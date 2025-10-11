@@ -737,7 +737,7 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
 
     return processed_count[0]
 
-def discover_all_folders(token, folder_id, folder_path="/Documents", folders_list=None):
+def discover_all_folders(token, folder_id, folder_path="/Documents", folders_list=None, depth=0):
     """Recursively discover all folders in the tree without processing files
 
     Returns: List of tuples [(folder_path, folder_name, folder_id), ...]
@@ -758,17 +758,22 @@ def discover_all_folders(token, folder_id, folder_path="/Documents", folders_lis
     items = response.json().get("value", [])
 
     # Find all subfolders
-    for item in items:
-        if "folder" in item:
-            folder_name = item['name']
-            subfolder_path = f"{folder_path}/{folder_name}"
-            subfolder_id = item['id']
+    subfolder_items = [item for item in items if "folder" in item]
 
-            # Add this folder to the list
-            folders_list.append((subfolder_path, folder_name, subfolder_id))
+    for item in subfolder_items:
+        folder_name = item['name']
+        subfolder_path = f"{folder_path}/{folder_name}"
+        subfolder_id = item['id']
 
-            # Recursively discover subfolders
-            discover_all_folders(token, subfolder_id, subfolder_path, folders_list)
+        # Add this folder to the list
+        folders_list.append((subfolder_path, folder_name, subfolder_id))
+
+        # Show progress every 10 folders at root level
+        if depth == 0 and len(folders_list) % 10 == 0:
+            print(f"   ... discovered {len(folders_list)} folders so far")
+
+        # Recursively discover subfolders
+        discover_all_folders(token, subfolder_id, subfolder_path, folders_list, depth + 1)
 
     return folders_list
 
