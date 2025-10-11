@@ -568,7 +568,7 @@ def crawl_folder_recursive(token, folder_id, folder_path, max_files, skip_cache,
 
         # Ask if we should process this folder
         if should_process_folder(subfolder_path, folder_name, skip_cache, interactive):
-            processed_count[0] = crawl_folder_recursive(
+            crawl_folder_recursive(
                 token, subfolder_id, subfolder_path, max_files, skip_cache,
                 extracted_files, failed_files, skipped_files, processed_count, interactive
             )
