@@ -1188,7 +1188,11 @@ if __name__ == "__main__":
                     print("\n⚠️ Invalid input, defaulting to no limit\n")
                     max_files = None
 
-            files = list_documents_folder(token, max_files=max_files, interactive=True)
+            # If we have cached folder choices, skip the discovery phase
+            if has_cache:
+                files = list_documents_folder(token, max_files=max_files, interactive=False, preflight=False)
+            else:
+                files = list_documents_folder(token, max_files=max_files, interactive=True, preflight=True)
             break
 
         elif choice == "2":
