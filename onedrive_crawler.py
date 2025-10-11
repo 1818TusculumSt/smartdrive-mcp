@@ -372,8 +372,8 @@ def extract_text_from_file(token, file_item):
                 print(f"   ⚠️ Failed to parse .doc file: {e}")
                 return None
 
-        # PowerPoint extraction (.pptx, .ppt)
-        elif file_name.endswith(('.pptx', '.ppt')):
+        # PowerPoint extraction (.pptx)
+        elif file_name.endswith('.pptx'):
             try:
                 prs = Presentation(io.BytesIO(content))
                 text_parts = []
@@ -386,6 +386,18 @@ def extract_text_from_file(token, file_item):
             except Exception as pptx_error:
                 print(f"   ⚠️ PowerPoint parsing failed: {pptx_error}")
                 return None
+
+        # Legacy PowerPoint (.ppt) - index metadata only
+        elif file_name.endswith('.ppt'):
+            print(f"   📋 Legacy .ppt format - indexing filename/path only")
+            print(f"   💡 Tip: Save as .pptx to enable full-text indexing")
+            # Return minimal metadata text so file is still findable
+            return f"File: {file_name}\nType: Legacy PowerPoint (.ppt)\nNote: Full-text extraction not supported"
+
+        # Publisher files (.pub) - index metadata only
+        elif file_name.endswith('.pub'):
+            print(f"   📋 Publisher file - indexing filename/path only")
+            return f"File: {file_name}\nType: Microsoft Publisher (.pub)\nNote: Full-text extraction not supported"
 
         # Markdown extraction (.md)
         elif file_name.endswith(('.md', '.markdown')):
@@ -820,7 +832,7 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
                 "modified": item.get("lastModifiedDateTime", "")
             })
         elif text is None:
-            supported_extensions = ['pdf', 'docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xlsm', 'xltx', 'xltm',
+            supported_extensions = ['pdf', 'docx', 'doc', 'pptx', 'xlsx', 'xlsm', 'xltx', 'xltm',
                                    'png', 'jpg', 'jpeg', 'tiff', 'bmp', 'gif', 'img', 'txt', 'csv', 'json', 'md', 'markdown', 'zip']
             if file_ext in supported_extensions:
                 failed_files.append((file_name, file_ext))
