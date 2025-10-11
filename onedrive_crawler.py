@@ -1042,8 +1042,25 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
                 failed_files.append((file_name, file_ext))
                 print(f"   ❌ Failed to extract (see error above)")
             else:
+                # Unsupported file type - index with metadata only
                 skipped_files.append((file_name, file_ext))
-                print(f"   ⚠️ Skipped (unsupported type: .{file_ext})")
+                print(f"   📋 Unsupported type (.{file_ext}) - indexing metadata only")
+
+                # Create metadata entry
+                file_size_bytes = item.get("size", 0)
+                file_size_mb = file_size_bytes / (1024 * 1024) if file_size_bytes > 0 else 0
+                metadata_text = f"File: {file_name}\n"
+                metadata_text += f"Type: .{file_ext} (unsupported for text extraction)\n"
+                metadata_text += f"Size: {file_size_mb:.2f} MB ({file_size_bytes:,} bytes)\n"
+                metadata_text += f"Location: {folder_path}/{file_name}"
+
+                extracted_files.append({
+                    "name": file_name,
+                    "path": f"{folder_path}/{file_name}",
+                    "text": metadata_text,
+                    "size": item.get("size", 0),
+                    "modified": item.get("lastModifiedDateTime", "")
+                })
 
         processed_count[0] += 1
 
