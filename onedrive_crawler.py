@@ -569,40 +569,111 @@ def extract_text_from_file(token, file_item):
         print(f"❌ Failed to extract {file_name}: {e}")
         return None
 
-def upload_to_pinecone(files_data):
-    """Upload extracted files to Pinecone with embeddings"""
-    print(f"\n📤 Uploading {len(files_data)} files to Pinecone...")
+def generate_vector_id(file_path):
+    """Generate deterministic vector ID from file path"""
+    import hashlib
+    # Use MD5 hash of file path for consistent, URL-safe IDs
+    return hashlib.md5(file_path.encode('utf-8')).hexdigest()
+
+def upload_to_pinecone(files_data, check_existing=True):
+    """Upload extracted files to Pinecone with embeddings (incremental sync enabled)
+
+    Args:
+        files_data: List of file data dictionaries
+        check_existing: If True, check Pinecone for existing files and skip unchanged ones
+    """
+    print(f"\n📤 Processing {len(files_data)} files for Pinecone upload...")
+
+    # If incremental sync enabled, check which files already exist
+    existing_files = {}
+    if check_existing:
+        print(f"   🔍 Checking Pinecone for existing files...")
+        try:
+            # Query Pinecone for all existing file paths in batches
+            vector_ids = [generate_vector_id(file_data["path"]) for file_data in files_data]
+
+            # Fetch in batches of 100 (Pinecone limit)
+            for i in range(0, len(vector_ids), 100):
+                batch_ids = vector_ids[i:i+100]
+                try:
+                    result = index.fetch(ids=batch_ids, namespace="smartdrive")
+                    for vid, vector in result.get('vectors', {}).items():
+                        # Map back to file path
+                        file_path = vector.get('metadata', {}).get('file_path', '')
+                        if file_path:
+                            existing_files[file_path] = {
+                                "modified": vector.get('metadata', {}).get('modified', ''),
+                                "size": vector.get('metadata', {}).get('size', 0)
+                            }
+                except Exception as e:
+                    # Batch fetch failed, continue
+                    pass
+
+            if existing_files:
+                print(f"   ✅ Found {len(existing_files)} existing files in index")
+        except Exception as e:
+            print(f"   ⚠️ Could not check existing files: {e}")
+            print(f"   ℹ️  Proceeding without incremental sync")
 
     vectors = []
-    for idx, file_data in enumerate(files_data):
+    skipped_count = 0
+    updated_count = 0
+    new_count = 0
+
+    for file_data in files_data:
+        file_path = file_data["path"]
+        file_modified = file_data["modified"]
+        file_size = file_data["size"]
+
+        # Check if file exists and hasn't changed
+        if check_existing and file_path in existing_files:
+            existing = existing_files[file_path]
+            if existing["modified"] == file_modified and existing["size"] == file_size:
+                skipped_count += 1
+                print(f"   ⏭️  Skipped (unchanged): {file_data['name']}")
+                continue
+            else:
+                updated_count += 1
+                print(f"   🔄 Updating (modified): {file_data['name']}")
+        else:
+            new_count += 1
+            print(f"   ➕ Adding (new): {file_data['name']}")
+
         # Generate embedding
         text = file_data["text"][:8000]  # Truncate to reasonable length
         embedding = embedding_provider.get_embedding_sync(text)
 
         if embedding is None:
-            print(f"   ⚠️ Failed to generate embedding for: {file_data['name']}")
+            print(f"      ⚠️ Failed to generate embedding")
             continue
 
         embedding = embedding.tolist()
-        
-        vector_id = f"doc_{idx}_{file_data['name']}"
-        
+
+        # Generate deterministic vector ID from file path
+        vector_id = generate_vector_id(file_path)
+
         vectors.append({
             "id": vector_id,
             "values": embedding,
             "metadata": {
                 "file_name": file_data["name"],
-                "file_path": file_data["path"],
-                "size": file_data["size"],
-                "modified": file_data["modified"],
+                "file_path": file_path,
+                "size": file_size,
+                "modified": file_modified,
                 "text_preview": text[:500]  # Store preview for display
             }
         })
-        print(f"   🔢 Embedded: {file_data['name']}")
-    
-    # Upsert to Pinecone
-    index.upsert(vectors=vectors, namespace="smartdrive")
-    print(f"✅ Uploaded {len(vectors)} documents to Pinecone")
+
+    # Upsert to Pinecone (upsert will update existing or insert new)
+    if vectors:
+        index.upsert(vectors=vectors, namespace="smartdrive")
+        print(f"\n✅ Pinecone upload complete:")
+        print(f"   ➕ New files: {new_count}")
+        print(f"   🔄 Updated files: {updated_count}")
+        print(f"   ⏭️  Skipped (unchanged): {skipped_count}")
+        print(f"   📊 Total processed: {len(files_data)} files")
+    else:
+        print(f"\n✅ No files needed uploading (all {skipped_count} unchanged)")
 
 def load_folder_skip_cache():
     """Load folder skip preferences from cache"""
