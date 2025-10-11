@@ -1133,6 +1133,7 @@ def interactive_folder_selection(folders_list, skip_cache):
     quick_mode = False
     excluded_prefixes = []  # Track folders that should auto-skip their subfolders
     included_prefixes = []  # Track folders that should auto-process their subfolders
+    list_only_prefixes = []  # Track folders that should auto-list-only their subfolders
 
     for idx, (folder_path, folder_name, folder_id) in enumerate(folders_list, 1):
         # Check if this folder is under an excluded parent
@@ -1140,6 +1141,13 @@ def interactive_folder_selection(folders_list, skip_cache):
         if is_subfolder_of_excluded:
             skip_cache[folder_path] = "skip"
             print(f"\n[{idx}/{len(folders_list)}] {folder_name}/ → ⏭️  SKIP (parent excluded)")
+            continue
+
+        # Check if this folder is under a list-only parent
+        is_subfolder_of_list_only = any(folder_path.startswith(prefix + "/") for prefix in list_only_prefixes)
+        if is_subfolder_of_list_only:
+            skip_cache[folder_path] = "list-only"
+            print(f"\n[{idx}/{len(folders_list)}] {folder_name}/ → 📋 LIST-ONLY (parent list-only)")
             continue
 
         # Check if this folder is under an included parent
@@ -1182,8 +1190,14 @@ def interactive_folder_selection(folders_list, skip_cache):
                     print("   → ✅ Will PROCESS this folder")
                 break
             elif choice in ['l', 'list', 'list-only']:
+                # Count how many subfolders will be list-only
+                subfolder_count = sum(1 for p, _, _ in folders_list[idx:] if p.startswith(folder_path + "/"))
                 skip_cache[folder_path] = "list-only"
-                print("   → 📋 Will LIST-ONLY this folder")
+                list_only_prefixes.append(folder_path)  # Mark for auto-list-only subfolders
+                if subfolder_count > 0:
+                    print(f"   → 📋 Will LIST-ONLY this folder + {subfolder_count} subfolders")
+                else:
+                    print("   → 📋 Will LIST-ONLY this folder")
                 break
             elif choice in ['n', 'no', 'skip']:
                 skip_cache[folder_path] = "skip"
