@@ -499,7 +499,9 @@ def save_folder_skip_cache(cache):
         json.dump(cache, f, indent=2)
 
 def should_process_folder(folder_path, folder_name, skip_cache, interactive=True):
-    """Ask user if they want to process this folder"""
+    """Ask user if they want to process this folder
+    Returns: 'process', 'skip', or 'list-only'
+    """
     cache_key = folder_path
 
     # Check cache first
@@ -507,36 +509,113 @@ def should_process_folder(folder_path, folder_name, skip_cache, interactive=True
         decision = skip_cache[cache_key]
         if decision == "skip":
             print(f"📁 {folder_name}/ [SKIPPED - cached choice]")
-            return False
+            return "skip"
         elif decision == "process":
             print(f"📁 {folder_name}/ [PROCESSING - cached choice]")
-            return True
+            return "process"
+        elif decision == "list-only":
+            print(f"📁 {folder_name}/ [LIST ONLY - cached choice]")
+            return "list-only"
 
     # Ask user if interactive
     if interactive:
         print(f"\n📁 Found folder: {folder_name}/")
         print(f"   Path: {folder_path}")
         while True:
-            choice = input("   Process this folder? [y]es / [n]o / [a]lways yes / [s]kip always: ").lower().strip()
+            choice = input("   [y]es / [n]o / [l]ist-only / [a]lways yes / [s]kip always / [o]nly list always: ").lower().strip()
             if choice in ['y', 'yes', '']:
-                return True
+                return "process"
             elif choice in ['n', 'no']:
-                return False
+                return "skip"
+            elif choice in ['l', 'list', 'list-only']:
+                return "list-only"
             elif choice in ['a', 'always']:
                 skip_cache[cache_key] = "process"
                 save_folder_skip_cache(skip_cache)
                 print(f"   ✅ Will always process this folder")
-                return True
+                return "process"
             elif choice in ['s', 'skip']:
                 skip_cache[cache_key] = "skip"
                 save_folder_skip_cache(skip_cache)
                 print(f"   ⏭️ Will always skip this folder")
-                return False
+                return "skip"
+            elif choice in ['o', 'only', 'only-list']:
+                skip_cache[cache_key] = "list-only"
+                save_folder_skip_cache(skip_cache)
+                print(f"   📋 Will always list-only this folder")
+                return "list-only"
             else:
                 print("   Invalid choice, please try again.")
 
     # Default: process if not interactive
-    return True
+    return "process"
+
+def list_folder_contents_only(token, folder_id, folder_path, extracted_files, processed_count):
+    """Recursively list all files in a folder without extracting content (like ZIP list mode)"""
+    headers = {"Authorization": f"Bearer {token}"}
+    base_url = "https://graph.microsoft.com/v1.0/me/drive"
+
+    # List items in current folder
+    url = f"{base_url}/items/{folder_id}/children"
+    response = requests.get(url, headers=headers)
+
+    if response.status_code != 200:
+        print(f"   ⚠️ Failed to access folder: {response.text}")
+        return
+
+    items = response.json().get("value", [])
+    folders = [item for item in items if "folder" in item]
+    files = [item for item in items if "file" in item]
+
+    # Collect file listing
+    file_list = []
+    for item in files:
+        file_name = item['name']
+        file_size = item.get("size", 0)
+        file_modified = item.get("lastModifiedDateTime", "")
+        file_list.append(f"  • {file_name} ({file_size} bytes)")
+        processed_count[0] += 1
+
+    # Recursively list subfolders
+    for folder_item in folders:
+        folder_name = folder_item['name']
+        subfolder_path = f"{folder_path}/{folder_name}"
+        subfolder_id = folder_item['id']
+
+        # Get subfolder contents
+        subfolder_url = f"{base_url}/items/{subfolder_id}/children"
+        subfolder_response = requests.get(subfolder_url, headers=headers)
+        if subfolder_response.status_code == 200:
+            subfolder_items = subfolder_response.json().get("value", [])
+            subfolder_files = [item for item in subfolder_items if "file" in item]
+            for item in subfolder_files:
+                file_name = item['name']
+                file_size = item.get("size", 0)
+                file_list.append(f"  • {subfolder_path}/{file_name} ({file_size} bytes)")
+                processed_count[0] += 1
+
+            # Recurse deeper
+            subfolder_folders = [item for item in subfolder_items if "folder" in item]
+            for sub_folder_item in subfolder_folders:
+                list_folder_contents_only(
+                    token, sub_folder_item['id'], f"{subfolder_path}/{sub_folder_item['name']}",
+                    extracted_files, processed_count
+                )
+
+    # Create a single entry with the folder listing
+    if file_list:
+        folder_listing_text = f"=== Folder: {folder_path} ===\n"
+        folder_listing_text += f"Contains {len(file_list)} files:\n"
+        folder_listing_text += "\n".join(file_list)
+
+        extracted_files.append({
+            "name": f"{folder_path.split('/')[-1]} (folder listing)",
+            "path": folder_path,
+            "text": folder_listing_text,
+            "size": 0,
+            "modified": ""
+        })
+        print(f"   ✅ Listed {len(file_list)} files")
 
 def crawl_folder_recursive(token, folder_id, folder_path, max_files, skip_cache, extracted_files, failed_files, skipped_files, processed_count, interactive=True):
     """Recursively crawl folders and extract files"""
@@ -567,11 +646,21 @@ def crawl_folder_recursive(token, folder_id, folder_path, max_files, skip_cache,
         subfolder_id = folder_item['id']
 
         # Ask if we should process this folder
-        if should_process_folder(subfolder_path, folder_name, skip_cache, interactive):
+        folder_mode = should_process_folder(subfolder_path, folder_name, skip_cache, interactive)
+
+        if folder_mode == "process":
+            # Full processing - recurse into subfolder
             crawl_folder_recursive(
                 token, subfolder_id, subfolder_path, max_files, skip_cache,
                 extracted_files, failed_files, skipped_files, processed_count, interactive
             )
+        elif folder_mode == "list-only":
+            # List-only mode - just index filenames and paths (like ZIP list mode)
+            print(f"   📋 Listing files only (not extracting content)")
+            list_folder_contents_only(
+                token, subfolder_id, subfolder_path, extracted_files, processed_count
+            )
+        # else: skip - do nothing
 
     # Process files in current folder
     for item in files:
@@ -775,12 +864,17 @@ if __name__ == "__main__":
                 print("📂 Cached Folder Choices:")
                 print("=" * 60)
                 for idx, (folder_path, decision) in enumerate(skip_cache.items(), 1):
-                    status = "✅ PROCESS" if decision == "process" else "⏭️  SKIP"
+                    if decision == "process":
+                        status = "✅ PROCESS"
+                    elif decision == "skip":
+                        status = "⏭️  SKIP"
+                    else:
+                        status = "📋 LIST-ONLY"
                     print(f"{idx}. {status} - {folder_path}")
                 print("=" * 60)
 
                 print("\nOptions:")
-                print("  - Enter folder number to toggle skip/process")
+                print("  - Enter folder number to cycle through modes (process → list-only → skip → process)")
                 print("  - Type 'delete #' to remove a cached choice (e.g., 'delete 3')")
                 print("  - Press Enter to go back")
 
@@ -804,10 +898,18 @@ if __name__ == "__main__":
                         num = int(edit_choice)
                         folder_to_toggle = list(skip_cache.keys())[num - 1]
                         current = skip_cache[folder_to_toggle]
-                        new_value = "skip" if current == "process" else "process"
+                        # Cycle through: process -> list-only -> skip -> process
+                        if current == "process":
+                            new_value = "list-only"
+                            status = "LIST-ONLY"
+                        elif current == "list-only":
+                            new_value = "skip"
+                            status = "SKIP"
+                        else:  # skip
+                            new_value = "process"
+                            status = "PROCESS"
                         skip_cache[folder_to_toggle] = new_value
                         save_folder_skip_cache(skip_cache)
-                        status = "PROCESS" if new_value == "process" else "SKIP"
                         print(f"✅ Changed to {status}: {folder_to_toggle}\n")
                     except (IndexError, ValueError):
                         print("❌ Invalid number\n")
