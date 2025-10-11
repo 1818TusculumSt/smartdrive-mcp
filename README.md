@@ -27,8 +27,9 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 - **Archives**: ZIP files (list contents or extract and index)
 
 ### OCR Support
-- **Built-in OCR**: EasyOCR for scanned PDFs and images (no external software needed!)
-- **No Setup Required**: Works out of the box, downloads models automatically
+- **Local OCR**: EasyOCR for scanned PDFs and images (free, no external software!)
+- **Cloud OCR**: Azure Computer Vision for 10-20x faster processing (optional)
+- **No Setup Required**: Local OCR works out of the box
 - **Smart Detection**: Automatically detects scanned PDFs and applies OCR
 
 ---
@@ -265,11 +266,35 @@ EMBEDDING_MODEL=your-model-name
 
 ### OCR Configuration
 
-OCR works out of the box with EasyOCR! For advanced users:
+SmartDrive supports two OCR methods:
 
-- See [SETUP_OCR.md](SETUP_OCR.md) for optional Tesseract setup (2-3x faster)
-- OCR automatically detects scanned PDFs
-- Models download automatically on first use (~100MB)
+#### Local OCR (EasyOCR - Default)
+- **Free** and works out of the box
+- Downloads models automatically on first use (~100MB)
+- **Speed**: 10-30 seconds per page
+- No external dependencies
+
+#### Cloud OCR (Azure Computer Vision - Optional)
+Add to your `.env`:
+```env
+AZURE_VISION_KEY=your_azure_vision_key
+AZURE_VISION_ENDPOINT=https://your-region.api.cognitive.microsoft.com/
+```
+
+**Benefits:**
+- **10-20x faster**: 1-3 seconds per page vs 10-30 seconds
+- More accurate OCR results
+- No CPU/GPU load on your machine
+- **Free tier**: 5,000 pages/month
+- **Paid tier**: $1.50 per 1,000 pages (~$0.50-$2 for typical use)
+
+**Setup:**
+1. Go to [Azure Portal](https://portal.azure.com)
+2. Create "Computer Vision" resource
+3. Choose "Free F0" tier (5,000 pages/month) or "Standard S1"
+4. Copy your API key and endpoint to `.env`
+
+SmartDrive will automatically use Azure OCR if credentials are provided, otherwise falls back to local EasyOCR.
 
 ### Indexing Customization
 
