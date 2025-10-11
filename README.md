@@ -1,297 +1,222 @@
-<img width="1024" height="576" alt="Adobe Express - file" src="https://github.com/user-attachments/assets/0d591de8-f907-4313-8233-13c89b59a2f3" />
+![SmartDrive Logo](logo.png)
 
-# SmartMemory MCP Server
+# SmartDrive 🧠☁️
 
-Auto-extracting memory system for Claude Desktop with semantic search powered by Pinecone and LLM analysis.
+**Semantic search for your OneDrive, powered by local embeddings and Pinecone.**
 
-## Features
+SmartDrive is an MCP (Model Context Protocol) server that brings intelligent semantic search to your Microsoft OneDrive documents. Ask Claude to find "tax forms" and it'll surface your 1099s, W-2s, and related docs—even if those exact words aren't in the filename.
 
-- **Automatic Memory Extraction**: Uses LLM to identify user-specific facts, preferences, and context
-- **Semantic Search**: Vector-based similarity search using embeddings
-- **Deduplication**: Prevents duplicate memories using embedding similarity
-- **Configurable Providers**: Switch between local and API-based embeddings
-- **Auto-Pruning**: Maintains memory limit by removing oldest entries
-- **Multi-User Support**: Track memories per user with user_id filtering
-- **Session Tracking**: Organize memories by conversation with agent_id and run_id
-- **Batch Operations**: Delete multiple memories at once for efficiency
-- **Category Filtering**: Search memories by specific categories/tags
-- **Statistics & Monitoring**: Get real-time stats on memory usage
+Built with **zero API costs** for embeddings (100% local), making it accessible for everyone.
 
-## Attribution
+---
 
-This project's memory management system was derived from [gramanoid's Adaptive Memory filter for Open WebUI](https://github.com/gramanoid/owui-adaptive-memory). The original filter provided the foundation for LLM-based memory extraction, embedding similarity, and semantic deduplication. This implementation refactors those concepts into a standalone MCP server / REST API with simplified architecture for broader platform compatibility.
+## 🔥 Features
 
-## Prerequisites
+- **Semantic Search**: Natural language queries across your OneDrive
+- **Local Embeddings**: Free, fast sentence-transformers (no OpenAI costs)
+- **Privacy-First**: Your documents stay in your OneDrive; only embeddings are stored
+- **MCP Integration**: Works natively with Claude Desktop (and Open WebUI soon)
+- **Document Support**: PDFs, Word docs (.docx), plain text files
+- **Easy Setup**: Device code auth—no complex Azure app config
 
-- Python 3.11+
-- Pinecone account and API key
-- OpenAI API key (or compatible LLM API)
-- Claude Desktop for Windows
+---
 
-## Installation
+## 📦 Installation
 
-### 1. Clone or Download
+### Prerequisites
 
-Create the project directory and download all files:
+- Python 3.10+
+- Microsoft 365 account with OneDrive
+- Pinecone account (free tier works)
+- Claude Desktop
 
-```
-C:\Users\YourUsername\mcp-smartmemory\
-```
+### Setup
 
-### 2. Install Python Dependencies
-
-Open PowerShell or Command Prompt in the project directory:
-
-```powershell
-cd C:\Users\YourUsername\mcp-smartmemory
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 3. Configure Claude Desktop
-
-Edit your Claude Desktop config file:
-
-**Windows Location:**
-```
-%APPDATA%\Claude\claude_desktop_config.json
-```
-
-Add the SmartMemory server:
-
-```json
-{
-  "mcpServers": {
-    "smartmemory": {
-      "command": "C:\\Users\\YourUsername\\mcp-smartmemory\\venv\\Scripts\\python.exe",
-      "args": ["C:\\Users\\YourUsername\\mcp-smartmemory\\server.py"],
-      "env": {
-        "PINECONE_API_KEY": "your-pinecone-api-key",
-        "PINECONE_ENVIRONMENT": "us-east-1-aws",
-        "PINECONE_INDEX_NAME": "adaptive-memory",
-        "LLM_API_URL": "https://api.openai.com/v1/chat/completions",
-        "LLM_API_KEY": "your-openai-api-key",
-        "LLM_MODEL": "gpt-4o-mini",
-        "EMBEDDING_PROVIDER": "pinecone",
-        "EMBEDDING_MODEL": "llama-text-embed-v2",
-        "MAX_MEMORIES": "200",
-        "DEDUP_THRESHOLD": "0.95",
-        "MIN_CONFIDENCE": "0.5",
-        "RELEVANCE_THRESHOLD": "0.6"
-      }
-    }
-  }
-}
-```
-
-**Important:** Use double backslashes (`\\`) in Windows paths in JSON.
-
-### 4. (Optional) Create .env File for Manual Testing
-
-If you want to test the server manually (not through Claude Desktop), create a `.env` file in the project directory:
-
-```
-PINECONE_API_KEY=your-pinecone-api-key
-PINECONE_ENVIRONMENT=us-east-1-aws
-PINECONE_INDEX_NAME=smartmemory
-LLM_API_URL=https://api.openai.com/v1/chat/completions
-LLM_API_KEY=your-openai-api-key
-LLM_MODEL=gpt-4o-mini
-EMBEDDING_PROVIDER=pinecone
-EMBEDDING_MODEL=llama-text-embed-v2
-MAX_MEMORIES=200
-DEDUP_THRESHOLD=0.95
-MIN_CONFIDENCE=0.5
-RELEVANCE_THRESHOLD=0.6
-```
-
-**Note:** This is only needed for `python server.py` testing. Claude Desktop passes these values from the JSON config.
-
-### 5. Restart Claude Desktop
-
-Completely quit and restart Claude Desktop for the MCP server to load.
-
-## Usage
-
-The server provides 6 tools that Claude can use:
-
-### 1. Extract Memories
-
-Automatically extracts and stores memories from conversation:
-
-```
-User: "I just adopted a cat named Whiskers"
-Claude uses extract_memories tool in background
-→ Stores: "User has a cat named Whiskers"
-```
-
-**Optional Parameters:**
-- `user_id`: Associate memory with specific user
-- `agent_id`: Track which agent created the memory
-- `run_id`: Link memory to conversation session
-
-### 2. Search Memories
-
-Search for specific memories with advanced filtering:
-
-```
-User: "What do you know about my pets?"
-Claude uses search_memories with query="pets"
-→ Returns relevant memories
-```
-
-**Optional Parameters:**
-- `user_id`: Filter memories by user
-- `agent_id`: Filter memories by agent
-- `categories`: Filter by memory tags (e.g., ["preference", "identity"])
-
-### 3. Get Relevant Memories
-
-Retrieves contextually relevant memories above relevance threshold:
-
-```
-User: "Tell me about my hobbies"
-Claude uses get_relevant_memories
-→ Returns hobby-related memories above relevance threshold
-```
-
-**Optional Parameters:**
-- `user_id`: Filter memories by user
-
-### 4. Delete Memory
-
-Remove a specific memory by ID:
-
-```
-User: "Delete that memory about my cat"
-Claude uses delete_memory with memory_id
-→ Removes the memory
-```
-
-### 5. Batch Delete Memories
-
-Delete multiple memories at once:
-
-```
-Claude uses batch_delete_memories with memory_ids=["mem_123", "mem_456"]
-→ Deletes both memories efficiently
-```
-
-### 6. Get Stats
-
-View memory system statistics:
-
-```
-Claude uses get_stats
-→ Returns: Total memories, embedding dimension, max capacity
-```
-
-## Configuration Options
-
-All settings are configured via environment variables in Claude Desktop config:
-
-### Embedding Providers
-
-**Pinecone Inference (Recommended)**
-```json
-"EMBEDDING_PROVIDER": "pinecone",
-"EMBEDDING_MODEL": "llama-text-embed-v2"
-```
-Supported models: `llama-text-embed-v2` (1024-dim), `multilingual-e5-large` (1024-dim)
-
-**Local (sentence-transformers)**
-```json
-"EMBEDDING_PROVIDER": "local",
-"EMBEDDING_MODEL": "all-MiniLM-L6-v2"
-```
-Supported models: `all-MiniLM-L6-v2` (384-dim), `all-mpnet-base-v2` (768-dim)
-
-**API (OpenAI-compatible)**
-```json
-"EMBEDDING_PROVIDER": "api",
-"EMBEDDING_API_URL": "https://api.openai.com/v1/embeddings",
-"EMBEDDING_API_KEY": "your-key",
-"EMBEDDING_MODEL": "text-embedding-3-small"
-```
-
-### Memory Settings
-
-```json
-"MAX_MEMORIES": "200",           // Max memories before pruning
-"DEDUP_THRESHOLD": "0.95",       // Similarity threshold for duplicates (0-1)
-"MIN_CONFIDENCE": "0.5",         // Min confidence to store memory (0-1)
-"RELEVANCE_THRESHOLD": "0.6"     // Min relevance to return memory (0-1)
-```
-
-## Troubleshooting
-
-### MCP Server Not Appearing in Claude
-
-1. Check Claude Desktop logs:
-   - Windows: `%APPDATA%\Claude\logs\mcp.log`
-
-2. Verify Python path is correct:
-   ```powershell
-   C:\Users\YourUsername\mcp-smartmemory\venv\Scripts\python.exe --version
+1. **Clone the repo**
+   ```bash
+   git clone https://github.com/1818TusculumSt/smartdrive-mcp.git
+   cd smartdrive-mcp
    ```
 
-3. Test the server manually:
-   ```powershell
-   cd C:\Users\YourUsername\mcp-smartmemory
-   .\venv\Scripts\activate
-   python server.py
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
    ```
+
+3. **Create Azure App Registration**
+   - Go to [Azure Portal](https://portal.azure.com) → **App Registrations** → **New registration**
+   - Name: `SmartDrive MCP`
+   - Supported accounts: **Personal Microsoft accounts only**
+   - Redirect URI: Leave blank
+   - After creation, go to **API permissions** → Add:
+     - `Files.Read.All`
+     - `User.Read`
+   - Go to **Authentication** → Enable **Allow public client flows**
+   - Copy **Application (client) ID** and **Directory (tenant) ID**
+
+4. **Create Pinecone Index**
+   - Go to [Pinecone](https://www.pinecone.io/) → Create Index
+   - Name: `smartdrive`
+   - Dimensions: `384`
+   - Metric: `cosine`
+   - Vector type: `dense`
+   - Copy your **API Key** and **Index Host**
+
+5. **Configure `.env`**
+   ```env
+   PINECONE_API_KEY=your_pinecone_api_key
+   PINECONE_INDEX_NAME=smartdrive
+   PINECONE_HOST=smartdrive-xxxxx.svc.aped-xxxx-xxxx.pinecone.io
    
-   It should start without errors. Press Ctrl+C to stop.
+   MICROSOFT_CLIENT_ID=your_azure_client_id
+   MICROSOFT_TENANT_ID=consumers
+   ```
 
-### Memory Extraction Not Working
+6. **Index your OneDrive**
+   ```bash
+   python onedrive_crawler.py
+   ```
+   - Follow the device code authentication prompts
+   - Currently indexes the `/Documents` folder (first 50 files for testing)
 
-- Check API keys are correct
-- Verify Pinecone index exists and is accessible
-- Check logs in Claude Desktop
+7. **Add to Claude Desktop**
 
-### Embedding Errors
+   Edit `%APPDATA%\Claude\claude_desktop_config.json`:
+   
+   ```json
+   {
+     "mcpServers": {
+       "smartdrive": {
+         "command": "python",
+         "args": [
+           "C:\\path\\to\\smartdrive-mcp\\smartdrive_server.py"
+         ],
+         "env": {
+           "PINECONE_API_KEY": "your_pinecone_api_key",
+           "PINECONE_INDEX_NAME": "smartdrive",
+           "PINECONE_HOST": "smartdrive-xxxxx.svc.aped-xxxx-xxxx.pinecone.io"
+         }
+       }
+     }
+   }
+   ```
 
-- If using local embeddings, ensure the model downloaded correctly
-- Try deleting and recreating the virtual environment
-- Check available disk space
+8. **Restart Claude Desktop**
 
-## Architecture
+---
+
+## 🚀 Usage
+
+In Claude Desktop, simply ask:
+
+- "Search my OneDrive for resume"
+- "Find tax documents"
+- "Show me project proposals from this year"
+
+SmartDrive will semantically search your indexed documents and return relevant results with file paths, modification dates, and content previews.
+
+---
+
+## 🏗️ Architecture
 
 ```
-Claude Desktop
-      │
-      ├─── MCP Protocol (stdio)
-      │
-SmartMemory Server (Python)
-      │
-      ├─── Memory Engine
-      ├─── LLM Client (OpenAI API)
-      ├─── Embedding Provider (Local/API)
-      │
-Pinecone Vector Database
+┌─────────────────┐
+│  Claude Desktop │
+└────────┬────────┘
+         │ MCP Protocol
+         ▼
+┌─────────────────────┐
+│ smartdrive_server.py│
+│  (MCP Server)       │
+└────────┬────────────┘
+         │
+         ├──► sentence-transformers (local embeddings)
+         │
+         └──► Pinecone (vector storage)
 ```
 
-## Files
+**Crawler Flow:**
+1. `onedrive_crawler.py` authenticates via Microsoft Graph API
+2. Extracts text from documents (PDF, DOCX, TXT)
+3. Generates embeddings using `all-MiniLM-L6-v2` (local)
+4. Stores vectors + metadata in Pinecone
 
-- `server.py` - MCP server entry point
-- `memory_engine.py` - Core memory extraction/storage logic
-- `embeddings.py` - Embedding generation (local/API)
-- `llm_client.py` - LLM API client
-- `config.py` - Configuration management
-- `requirements.txt` - Python dependencies
+**Search Flow:**
+1. Claude sends query to MCP server
+2. Query embedded locally
+3. Pinecone returns top-k similar vectors
+4. Results formatted with file metadata
 
-## Logs
+---
 
-Server logs are visible in Claude Desktop's MCP log file:
+## 🛠️ Configuration
 
-```
-%APPDATA%\Claude\logs\mcp.log
-```
+### Indexing Options
 
-Look for lines containing "smartmemory" to see what the server is doing.
+Edit `onedrive_crawler.py` to customize:
 
-## License
+- **File limit**: Change `max_files=50` to index more/fewer files
+- **Folders**: Modify the folder path from `/Documents` to any OneDrive folder
+- **File types**: Add support for Excel, images (OCR), etc.
 
-MIT
+### Embedding Model
+
+Currently uses `all-MiniLM-L6-v2` (384 dimensions). To use a different model:
+
+1. Update model name in both `onedrive_crawler.py` and `smartdrive_server.py`
+2. Recreate Pinecone index with matching dimensions
+3. Re-index your documents
+
+---
+
+## 🔮 Roadmap
+
+- [ ] Remove file indexing limits
+- [ ] Recursive folder crawling
+- [ ] Excel (.xlsx) support
+- [ ] Image OCR support (via Tesseract)
+- [ ] Incremental sync (only index changed files)
+- [ ] Open WebUI integration
+- [ ] Token caching for auth
+- [ ] Batch processing for large OneDrive libraries
+- [ ] Support for SharePoint/Teams files
+
+---
+
+## 🤝 Contributing
+
+Built for the community, by the community. PRs welcome!
+
+**Areas we'd love help with:**
+- Additional file format support
+- Performance optimizations
+- Better error handling
+- Documentation improvements
+- Open WebUI integration
+
+---
+
+## 📄 License
+
+MIT License - do whatever you want with this, just keep it free and accessible.
+
+---
+
+## 🙏 Acknowledgments
+
+- Built with [MCP](https://modelcontextprotocol.io/) by Anthropic
+- Embeddings via [sentence-transformers](https://www.sbert.net/)
+- Vector storage by [Pinecone](https://www.pinecone.io/)
+- Microsoft Graph API for OneDrive access
+
+---
+
+## 💬 Support
+
+Questions? Issues? Open a GitHub issue or reach out.
+
+Built with 🔥 by [@1818TusculumSt](https://github.com/1818TusculumSt)
+
+---
+
+**Remember:** This tool is designed to be cost-free for embeddings. Keep it that way for the community. 💪
