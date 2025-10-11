@@ -77,20 +77,30 @@ def save_token_cache(cache):
         with open(TOKEN_CACHE_FILE, 'w') as f:
             f.write(cache.serialize())
 
-def get_access_token():
-    """Authenticate using device code flow with token caching"""
+def get_access_token(silent_only=False):
+    """Authenticate using device code flow with token caching
+
+    Args:
+        silent_only: If True, only attempt silent token refresh (no interactive prompts)
+    """
     cache = load_token_cache()
     app = msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY, token_cache=cache)
 
     # Try to get token silently from cache first
     accounts = app.get_accounts()
     if accounts:
-        print("🔄 Using cached credentials...")
+        if not silent_only:
+            print("🔄 Using cached credentials...")
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
         if result and "access_token" in result:
             save_token_cache(cache)
-            print("✅ Authentication successful (cached)\n")
+            if not silent_only:
+                print("✅ Authentication successful (cached)\n")
             return result["access_token"]
+
+    # If silent_only mode, return None (caller will handle)
+    if silent_only:
+        return None
 
     # If silent auth fails, do interactive device flow
     print("🔐 No cached credentials found, starting authentication...")
@@ -617,18 +627,48 @@ def list_folder_contents_only(token, folder_id, folder_path, extracted_files, pr
         })
         print(f"   ✅ Listed {len(file_list)} files")
 
-def crawl_folder_recursive(token, folder_id, folder_path, max_files, skip_cache, extracted_files, failed_files, skipped_files, processed_count, interactive=True):
-    """Recursively crawl folders and extract files"""
-    headers = {"Authorization": f"Bearer {token}"}
+def is_token_expired(response):
+    """Check if response indicates token expiration"""
+    if response.status_code == 401:
+        return True
+    if response.status_code == 400:
+        try:
+            error_data = response.json()
+            error_msg = str(error_data.get("error", {})).lower()
+            return "invalidauthenticationtoken" in error_msg or "jwt" in error_msg or "token" in error_msg
+        except:
+            pass
+    return False
+
+def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_cache, extracted_files, failed_files, skipped_files, processed_count, interactive=True):
+    """Recursively crawl folders and extract files
+
+    Args:
+        token_ref: List containing the current access token [token]. Using a list allows updating the token reference.
+    """
+    headers = {"Authorization": f"Bearer {token_ref[0]}"}
     base_url = "https://graph.microsoft.com/v1.0/me/drive"
 
     # List items in current folder
     url = f"{base_url}/items/{folder_id}/children"
     response = requests.get(url, headers=headers)
 
+    # If token expired, try to refresh it
+    if is_token_expired(response):
+        print(f"   🔄 Token expired, refreshing...")
+        new_token = get_access_token(silent_only=True)
+        if new_token:
+            token_ref[0] = new_token  # Update token reference
+            headers = {"Authorization": f"Bearer {token_ref[0]}"}
+            response = requests.get(url, headers=headers)  # Retry request
+            print(f"   ✅ Token refreshed successfully")
+        else:
+            print(f"   ❌ Token refresh failed")
+            return processed_count[0]
+
     if response.status_code != 200:
         print(f"   ⚠️ Failed to access folder: {response.text}")
-        return processed_count
+        return processed_count[0]
 
     items = response.json().get("value", [])
 
@@ -651,14 +691,14 @@ def crawl_folder_recursive(token, folder_id, folder_path, max_files, skip_cache,
         if folder_mode == "process":
             # Full processing - recurse into subfolder
             crawl_folder_recursive(
-                token, subfolder_id, subfolder_path, max_files, skip_cache,
+                token_ref, subfolder_id, subfolder_path, max_files, skip_cache,
                 extracted_files, failed_files, skipped_files, processed_count, interactive
             )
         elif folder_mode == "list-only":
             # List-only mode - just index filenames and paths (like ZIP list mode)
             print(f"   📋 Listing files only (not extracting content)")
             list_folder_contents_only(
-                token, subfolder_id, subfolder_path, extracted_files, processed_count
+                token_ref[0], subfolder_id, subfolder_path, extracted_files, processed_count
             )
         # else: skip - do nothing
 
@@ -672,7 +712,7 @@ def crawl_folder_recursive(token, folder_id, folder_path, max_files, skip_cache,
         file_ext = file_name.lower().split('.')[-1] if '.' in file_name else 'no extension'
         print(f"📄 Processing: {folder_path}/{file_name}")
 
-        text = extract_text_from_file(token, item)
+        text = extract_text_from_file(token_ref[0], item)
 
         if text:
             print(f"   ✅ Extracted {len(text)} characters")
@@ -728,9 +768,10 @@ def list_documents_folder(token, max_files=None, interactive=True):
     if interactive:
         print(f"💡 Tip: You'll be asked about each folder. Choose 'always' to remember your choice!\n")
 
-    # Start recursive crawl
+    # Start recursive crawl (pass token as reference list for refresh capability)
+    token_ref = [token]
     crawl_folder_recursive(
-        token, folder_id, "/Documents", max_files, skip_cache,
+        token_ref, folder_id, "/Documents", max_files, skip_cache,
         extracted_files, failed_files, skipped_files, processed_count, interactive
     )
 
