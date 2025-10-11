@@ -737,13 +737,17 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
 
     return processed_count[0]
 
-def discover_all_folders(token, folder_id, folder_path="/Documents", folders_list=None, depth=0):
+def discover_all_folders(token, folder_id, folder_path="/Documents", folders_list=None, failed_folders=None, depth=0):
     """Recursively discover all folders in the tree without processing files
 
-    Returns: List of tuples [(folder_path, folder_name, folder_id), ...]
+    Returns: Tuple of (folders_list, failed_folders)
+        folders_list: List of tuples [(folder_path, folder_name, folder_id), ...]
+        failed_folders: List of tuples [(folder_path, folder_id, error_msg), ...]
     """
     if folders_list is None:
         folders_list = []
+    if failed_folders is None:
+        failed_folders = []
 
     headers = {"Authorization": f"Bearer {token}"}
     base_url = "https://graph.microsoft.com/v1.0/me/drive"
@@ -757,18 +761,23 @@ def discover_all_folders(token, folder_id, folder_path="/Documents", folders_lis
         print(f"   ⏱️ Timeout on {folder_path} (>10s), retrying with 30s timeout...")
         try:
             response = requests.get(url, headers=headers, timeout=30)  # Retry with longer timeout
-        except:
-            print(f"   ❌ Still timeout. This folder's subfolders won't be discovered.")
-            # Note: The folder itself is already in the list, just can't get its subfolders
-            return folders_list
+        except Exception as retry_error:
+            error_msg = f"Timeout after 30s"
+            print(f"   ❌ Still timeout. Marking for later retry.")
+            failed_folders.append((folder_path, folder_id, error_msg))
+            return folders_list, failed_folders
     except requests.exceptions.RequestException as e:
-        print(f"   ⚠️ Network error on {folder_path}: {str(e)[:80]}")
-        print(f"   ⚠️ This folder's subfolders won't be discovered, but you can still choose it.")
-        return folders_list
+        error_msg = f"Network error: {str(e)[:60]}"
+        print(f"   ⚠️ {error_msg}")
+        print(f"   ⚠️ Marking for later retry.")
+        failed_folders.append((folder_path, folder_id, error_msg))
+        return folders_list, failed_folders
 
     if response.status_code != 200:
-        print(f"   ⚠️ API error {response.status_code} on {folder_path}")
-        return folders_list
+        error_msg = f"API error {response.status_code}"
+        print(f"   ⚠️ {error_msg} on {folder_path}. Marking for retry.")
+        failed_folders.append((folder_path, folder_id, error_msg))
+        return folders_list, failed_folders
 
     items = response.json().get("value", [])
 
@@ -788,9 +797,9 @@ def discover_all_folders(token, folder_id, folder_path="/Documents", folders_lis
             print(f"   ... {len(folders_list)} folders discovered")
 
         # Recursively discover subfolders
-        discover_all_folders(token, subfolder_id, subfolder_path, folders_list, depth + 1)
+        discover_all_folders(token, subfolder_id, subfolder_path, folders_list, failed_folders, depth + 1)
 
-    return folders_list
+    return folders_list, failed_folders
 
 def interactive_folder_selection(folders_list, skip_cache):
     """Present all folders to user and let them choose how to handle each one
@@ -896,8 +905,40 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
     # PREFLIGHT MODE: Discover all folders first, let user choose
     if preflight and interactive:
         print(f"🔍 Discovering all folders in Documents directory...")
-        folders_list = discover_all_folders(token, folder_id, "/Documents")
+        folders_list, failed_folders = discover_all_folders(token, folder_id, "/Documents")
         print(f"✅ Found {len(folders_list)} folders\n")
+
+        # If some folders failed, offer retry
+        retry_count = 0
+        while failed_folders and retry_count < 3:
+            print(f"\n⚠️  Warning: {len(failed_folders)} folder(s) failed during discovery")
+            for folder_path, folder_id_failed, error_msg in failed_folders:
+                print(f"   • {folder_path}: {error_msg}")
+
+            retry_choice = input(f"\nRetry failed folders? [y/n]: ").lower().strip()
+            if retry_choice not in ['y', 'yes']:
+                print("⏭️  Skipping failed folders, continuing with discovered folders...")
+                break
+
+            # Retry failed folders
+            print(f"\n🔄 Retrying {len(failed_folders)} failed folder(s)...")
+            new_failed = []
+            for folder_path, folder_id_failed, error_msg in failed_folders:
+                print(f"   Retrying: {folder_path}...")
+                partial_list, partial_failed = discover_all_folders(token, folder_id_failed, folder_path)
+                # Add newly discovered folders to main list
+                folders_list.extend(partial_list)
+                # Track still-failed folders
+                new_failed.extend(partial_failed)
+
+            failed_folders = new_failed
+            retry_count += 1
+
+            if not failed_folders:
+                print(f"✅ All folders recovered!\n")
+            elif retry_count >= 3:
+                print(f"⚠️  Still have {len(failed_folders)} failing folders after 3 retries")
+                print(f"   Continuing with {len(folders_list)} successfully discovered folders\n")
 
         # Let user select how to handle each folder
         skip_cache = interactive_folder_selection(folders_list, skip_cache)
