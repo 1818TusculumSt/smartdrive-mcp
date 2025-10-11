@@ -814,12 +814,21 @@ def interactive_folder_selection(folders_list, skip_cache):
     print("  [y] = Process (extract all file contents)")
     print("  [l] = List-only (index filenames without extracting)")
     print("  [n] = Skip (ignore this folder)")
+    print("  [x] = eXclude (skip this folder + ALL subfolders)")
     print("  [q] = Quick mode - assume 'yes' for all remaining folders")
     print("=" * 60)
 
     quick_mode = False
+    excluded_prefixes = []  # Track folders that should auto-skip their subfolders
 
     for idx, (folder_path, folder_name, folder_id) in enumerate(folders_list, 1):
+        # Check if this folder is under an excluded parent
+        is_subfolder_of_excluded = any(folder_path.startswith(prefix + "/") for prefix in excluded_prefixes)
+        if is_subfolder_of_excluded:
+            skip_cache[folder_path] = "skip"
+            print(f"\n[{idx}/{len(folders_list)}] {folder_name}/ → ⏭️  SKIP (parent excluded)")
+            continue
+
         # Check if we already have a cached decision
         if folder_path in skip_cache:
             decision = skip_cache[folder_path]
@@ -840,7 +849,7 @@ def interactive_folder_selection(folders_list, skip_cache):
         print(f"   Path: {folder_path}")
 
         while True:
-            choice = input("   Choice [y/l/n/q]: ").lower().strip()
+            choice = input("   Choice [y/l/n/x/q]: ").lower().strip()
 
             if choice in ['y', 'yes', '']:
                 skip_cache[folder_path] = "process"
@@ -854,6 +863,13 @@ def interactive_folder_selection(folders_list, skip_cache):
                 skip_cache[folder_path] = "skip"
                 print("   → ⏭️  Will SKIP this folder")
                 break
+            elif choice in ['x', 'exclude']:
+                # Count how many subfolders will be skipped
+                subfolder_count = sum(1 for p, _, _ in folders_list[idx:] if p.startswith(folder_path + "/"))
+                skip_cache[folder_path] = "skip"
+                excluded_prefixes.append(folder_path)  # Mark for auto-skipping subfolders
+                print(f"   → ⏭️  Will SKIP this folder + {subfolder_count} subfolders")
+                break
             elif choice in ['q', 'quick']:
                 skip_cache[folder_path] = "process"
                 quick_mode = True
@@ -861,7 +877,7 @@ def interactive_folder_selection(folders_list, skip_cache):
                 print("   🚀 Quick mode enabled - all remaining folders will be processed")
                 break
             else:
-                print("   Invalid choice, please enter y/l/n/q")
+                print("   Invalid choice, please enter y/l/n/x/q")
 
     # Save updated cache
     save_folder_skip_cache(skip_cache)
