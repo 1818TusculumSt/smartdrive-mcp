@@ -750,7 +750,15 @@ def discover_all_folders(token, folder_id, folder_path="/Documents", folders_lis
 
     # List items in current folder
     url = f"{base_url}/items/{folder_id}/children"
-    response = requests.get(url, headers=headers)
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)  # 10 second timeout
+    except requests.exceptions.Timeout:
+        print(f"   ⏱️ Timeout accessing {folder_path}, skipping...")
+        return folders_list
+    except requests.exceptions.RequestException as e:
+        print(f"   ⚠️ Error accessing {folder_path}: {str(e)[:100]}")
+        return folders_list
 
     if response.status_code != 200:
         return folders_list
@@ -768,9 +776,9 @@ def discover_all_folders(token, folder_id, folder_path="/Documents", folders_lis
         # Add this folder to the list
         folders_list.append((subfolder_path, folder_name, subfolder_id))
 
-        # Show progress every 10 folders at root level
-        if depth == 0 and len(folders_list) % 10 == 0:
-            print(f"   ... discovered {len(folders_list)} folders so far")
+        # Show progress more frequently (every 5 folders)
+        if len(folders_list) % 5 == 0:
+            print(f"   ... {len(folders_list)} folders discovered")
 
         # Recursively discover subfolders
         discover_all_folders(token, subfolder_id, subfolder_path, folders_list, depth + 1)
@@ -978,8 +986,15 @@ if __name__ == "__main__":
                 confirm = input("Are you sure? Type 'yes' to confirm: ").strip().lower()
                 if confirm == "yes":
                     print("🗑️  Clearing index...")
-                    index.delete(delete_all=True, namespace="smartdrive")
-                    print("✅ Index cleared!\n")
+                    try:
+                        index.delete(delete_all=True, namespace="smartdrive")
+                        print("✅ Index cleared!\n")
+                    except Exception as e:
+                        # If namespace doesn't exist yet, that's fine
+                        if "Namespace not found" in str(e) or "404" in str(e):
+                            print("ℹ️  Namespace doesn't exist yet (this is normal for first run)\n")
+                        else:
+                            print(f"⚠️  Clear failed: {e}\n")
                 else:
                     print("❌ Clear cancelled, will add to existing index\n")
             else:
