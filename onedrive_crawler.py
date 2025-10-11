@@ -285,6 +285,7 @@ def extract_text_from_file(token, file_item):
             if len(text.strip()) < 50:
                 print(f"   🔍 Scanned PDF detected ({pdf.page_count} pages), using OCR...")
 
+                azure_ocr_succeeded = False
                 if USE_AZURE_OCR:
                     # Use Azure Computer Vision OCR (10-20x faster!)
                     print(f"      ☁️  Using Azure OCR (1-3 seconds per page)...")
@@ -306,13 +307,12 @@ def extract_text_from_file(token, file_item):
                                 print("⚠️")
                         print(f"      ✅ Azure OCR complete!")
                         text = ocr_text
+                        azure_ocr_succeeded = True
                     except Exception as ocr_error:
                         print(f"      ⚠️ Azure OCR failed: {ocr_error}")
                         print(f"      🔄 Falling back to local OCR...")
-                        # Fall back to local OCR
-                        USE_AZURE_OCR = False  # Temporarily disable for this file
 
-                if not USE_AZURE_OCR or len(text.strip()) < 50:
+                if not azure_ocr_succeeded and len(text.strip()) < 50:
                     # Use local EasyOCR (slower but works offline)
                     print(f"      💻 Using local OCR (10-30 seconds per page)...")
                     try:
