@@ -387,12 +387,28 @@ def extract_text_from_file(token, file_item):
                 print(f"   ⚠️ PowerPoint parsing failed: {pptx_error}")
                 return None
 
-        # Legacy PowerPoint (.ppt) - index metadata only
+        # Legacy PowerPoint (.ppt) - use Apache Tika
         elif file_name.endswith('.ppt'):
-            print(f"   📋 Legacy .ppt format - indexing filename/path only")
-            print(f"   💡 Tip: Save as .pptx to enable full-text indexing")
-            # Return minimal metadata text so file is still findable
-            return f"File: {file_name}\nType: Legacy PowerPoint (.ppt)\nNote: Full-text extraction not supported"
+            print(f"   📋 Legacy .ppt format - using Apache Tika for extraction...")
+            try:
+                from tika import parser
+                # Parse .ppt file with Tika
+                parsed = parser.from_buffer(content)
+                text = parsed.get("content", "")
+                if text and len(text.strip()) > 20:
+                    print(f"   ✅ Extracted {len(text)} characters via Tika")
+                    return text.strip()
+                else:
+                    print(f"   ⚠️ Tika extraction returned no text")
+                    return f"File: {file_name}\nType: Legacy PowerPoint (.ppt)\nNote: No text extracted"
+            except ImportError:
+                print(f"   ⚠️ Apache Tika not installed - install 'tika' package and Java 11+")
+                print(f"   📋 Indexing filename/path only")
+                return f"File: {file_name}\nType: Legacy PowerPoint (.ppt)\nNote: Tika not available"
+            except Exception as tika_error:
+                print(f"   ⚠️ Tika extraction failed: {tika_error}")
+                print(f"   📋 Indexing filename/path only")
+                return f"File: {file_name}\nType: Legacy PowerPoint (.ppt)\nNote: Extraction failed"
 
         # Publisher files (.pub) - index metadata only
         elif file_name.endswith('.pub'):
@@ -674,6 +690,123 @@ def upload_to_pinecone(files_data, check_existing=True):
         print(f"   📊 Total processed: {len(files_data)} files")
     else:
         print(f"\n✅ No files needed uploading (all {skipped_count} unchanged)")
+
+def delete_folder_from_index(folder_path):
+    """Delete all files from a folder (and subfolders) from Pinecone index
+
+    Args:
+        folder_path: Path to folder to delete (e.g., "/Documents/MyFolder")
+
+    Returns:
+        Number of files deleted
+    """
+    print(f"\n🗑️  Searching for files in: {folder_path}")
+
+    try:
+        # Query Pinecone for all vectors with metadata.file_path starting with folder_path
+        # We'll need to use filter query - but Pinecone free tier doesn't support metadata filtering
+        # So we'll use a different approach: list all IDs and fetch metadata
+
+        # Get stats to see total vectors
+        stats = index.describe_index_stats()
+        namespace_stats = stats.get('namespaces', {}).get('smartdrive', {})
+        total_vectors = namespace_stats.get('vector_count', 0)
+
+        if total_vectors == 0:
+            print(f"ℹ️  Index is empty, nothing to delete")
+            return 0
+
+        print(f"   📊 Scanning {total_vectors} vectors in index...")
+
+        # Since we can't filter by metadata in free tier, we need to:
+        # 1. Generate all possible vector IDs for files in that folder
+        # 2. Or scan through all vectors (expensive but works)
+
+        # Better approach: Keep track during discovery
+        print(f"\n⚠️  Note: To delete specific folders, we need to scan your OneDrive")
+        print(f"   This will discover which files are in that folder")
+
+        # Get token
+        token = get_access_token(silent_only=True)
+        if not token:
+            print(f"❌ Need to refresh authentication")
+            token = get_access_token()
+
+        # Find the folder in OneDrive
+        headers = {"Authorization": f"Bearer {token}"}
+        base_url = "https://graph.microsoft.com/v1.0/me/drive"
+
+        # Parse folder path to find the folder
+        # folder_path format: "/Documents/MyFolder/SubFolder"
+        folder_url = f"{base_url}/root:{folder_path}"
+        response = requests.get(folder_url, headers=headers)
+
+        if response.status_code != 200:
+            print(f"❌ Folder not found in OneDrive: {folder_path}")
+            return 0
+
+        folder_id = response.json()["id"]
+        print(f"   ✅ Found folder in OneDrive")
+
+        # Discover all files in this folder and subfolders
+        print(f"   🔍 Discovering files in folder...")
+        file_paths = []
+        discover_files_in_folder(token, folder_id, folder_path, file_paths)
+
+        print(f"   ✅ Found {len(file_paths)} files to delete")
+
+        if len(file_paths) == 0:
+            print(f"ℹ️  No files found in folder")
+            return 0
+
+        # Generate vector IDs for these files
+        vector_ids = [generate_vector_id(fp) for fp in file_paths]
+
+        # Delete in batches of 100
+        deleted_count = 0
+        for i in range(0, len(vector_ids), 100):
+            batch_ids = vector_ids[i:i+100]
+            try:
+                index.delete(ids=batch_ids, namespace="smartdrive")
+                deleted_count += len(batch_ids)
+                print(f"   🗑️  Deleted batch: {deleted_count}/{len(vector_ids)} vectors")
+            except Exception as e:
+                print(f"   ⚠️  Batch delete failed: {e}")
+
+        print(f"\n✅ Deleted {deleted_count} files from index")
+        return deleted_count
+
+    except Exception as e:
+        print(f"❌ Delete failed: {e}")
+        return 0
+
+def discover_files_in_folder(token, folder_id, folder_path, file_paths):
+    """Recursively discover all file paths in a folder"""
+    headers = {"Authorization": f"Bearer {token}"}
+    base_url = "https://graph.microsoft.com/v1.0/me/drive"
+
+    url = f"{base_url}/items/{folder_id}/children"
+    response = requests.get(url, headers=headers)
+
+    if response.status_code != 200:
+        return
+
+    items = response.json().get("value", [])
+
+    # Add all files
+    for item in items:
+        if "file" in item:
+            file_name = item['name']
+            file_path = f"{folder_path}/{file_name}"
+            file_paths.append(file_path)
+
+    # Recurse into subfolders
+    for item in items:
+        if "folder" in item:
+            subfolder_name = item['name']
+            subfolder_path = f"{folder_path}/{subfolder_name}"
+            subfolder_id = item['id']
+            discover_files_in_folder(token, subfolder_id, subfolder_path, file_paths)
 
 def load_folder_skip_cache():
     """Load folder skip preferences from cache"""
@@ -1218,7 +1351,8 @@ if __name__ == "__main__":
         print("1. Run crawler (use cached folder choices)")
         print("2. Reset folder choices and start fresh")
         print("3. View/edit cached folder choices")
-        print("4. Exit")
+        print("4. Delete folder from index")
+        print("5. Exit")
         print("=" * 60)
 
         if has_cache:
@@ -1226,7 +1360,7 @@ if __name__ == "__main__":
         else:
             print("ℹ️  No cached folder choices yet")
 
-        choice = input("\nSelect option [1-4]: ").strip()
+        choice = input("\nSelect option [1-5]: ").strip()
 
         if choice == "1":
             # Run crawler
@@ -1371,6 +1505,39 @@ if __name__ == "__main__":
                 print("\n⚠️  No cached folder choices to view.\n")
 
         elif choice == "4":
+            # Delete folder from index
+            print("\n" + "=" * 60)
+            print("🗑️  Delete Folder from Index")
+            print("=" * 60)
+            print("This will remove all files from a folder (and subfolders) from the index.")
+            print("Example: /Documents/MyFolder")
+            print()
+
+            folder_path = input("Enter folder path to delete (or press Enter to cancel): ").strip()
+
+            if folder_path == "":
+                print("❌ Cancelled\n")
+                continue
+
+            # Confirm deletion
+            print(f"\n⚠️  WARNING: This will DELETE all indexed files from:")
+            print(f"   {folder_path}")
+            print(f"   And ALL subfolders within it!")
+            confirm = input("\nType 'delete' to confirm: ").strip().lower()
+
+            if confirm == "delete":
+                deleted_count = delete_folder_from_index(folder_path)
+
+                # Also update folder cache to skip this folder in future
+                if deleted_count > 0:
+                    print(f"\n💡 Updating folder cache to skip this folder in future...")
+                    skip_cache[folder_path] = "skip"
+                    save_folder_skip_cache(skip_cache)
+                    print(f"✅ Folder marked as 'skip' in cache\n")
+            else:
+                print("❌ Deletion cancelled\n")
+
+        elif choice == "5":
             print("\n👋 Goodbye!\n")
             exit(0)
 
