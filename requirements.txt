@@ -12,5 +12,6 @@ pydantic-settings
 aiohttp
 Pillow
 easyocr
+azure-ai-vision-imageanalysis
 olefile
 markdown

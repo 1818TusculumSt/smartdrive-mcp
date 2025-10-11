@@ -54,14 +54,63 @@ print("✅ Embedding provider loaded\n")
 # Initialize EasyOCR reader (lazy-loaded on first use)
 ocr_reader = None
 
+# Azure Computer Vision configuration
+AZURE_VISION_KEY = os.getenv("AZURE_VISION_KEY")
+AZURE_VISION_ENDPOINT = os.getenv("AZURE_VISION_ENDPOINT")
+USE_AZURE_OCR = bool(AZURE_VISION_KEY and AZURE_VISION_ENDPOINT)
+
+if USE_AZURE_OCR:
+    print("☁️  Azure Computer Vision OCR enabled (10-20x faster than local!)")
+    from azure.ai.vision.imageanalysis import ImageAnalysisClient
+    from azure.ai.vision.imageanalysis.models import VisualFeatures
+    from azure.core.credentials import AzureKeyCredential
+
+    azure_client = ImageAnalysisClient(
+        endpoint=AZURE_VISION_ENDPOINT,
+        credential=AzureKeyCredential(AZURE_VISION_KEY)
+    )
+    print("✅ Azure OCR ready\n")
+else:
+    print("💻 Using local EasyOCR (Azure OCR not configured)")
+    print("   💡 Tip: Add AZURE_VISION_KEY to .env for 10-20x faster OCR!\n")
+
 def get_ocr_reader():
     """Lazy-load EasyOCR reader (downloads models on first use)"""
     global ocr_reader
     if ocr_reader is None:
-        print("🔍 Loading OCR model (first time only, may take a moment)...")
+        print("🔍 Loading local OCR model (first time only, may take a moment)...")
         ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
-        print("✅ OCR model loaded\n")
+        print("✅ Local OCR model loaded\n")
     return ocr_reader
+
+def ocr_image_with_azure(image_data):
+    """Use Azure Computer Vision to extract text from image
+
+    Args:
+        image_data: Image bytes
+
+    Returns:
+        Extracted text or None if failed
+    """
+    try:
+        result = azure_client.analyze(
+            image_data=image_data,
+            visual_features=[VisualFeatures.READ]
+        )
+
+        if result.read is None or result.read.blocks is None:
+            return None
+
+        # Extract text from all blocks
+        text_parts = []
+        for block in result.read.blocks:
+            for line in block.lines:
+                text_parts.append(line.text)
+
+        return "\n".join(text_parts)
+    except Exception as e:
+        print(f"      ⚠️ Azure OCR failed: {e}")
+        return None
 
 def load_token_cache():
     """Load token cache from file"""
@@ -235,29 +284,59 @@ def extract_text_from_file(token, file_item):
             # If no text found or very little text (likely scanned), use OCR
             if len(text.strip()) < 50:
                 print(f"   🔍 Scanned PDF detected ({pdf.page_count} pages), using OCR...")
-                print(f"      ⏳ This may take 3-10 seconds per page...")
-                try:
-                    reader = get_ocr_reader()
-                    ocr_text = ""
-                    for page_num in range(pdf.page_count):
-                        print(f"      📄 Page {page_num+1}/{pdf.page_count}...", end=" ", flush=True)
-                        page = pdf[page_num]
-                        # Render page to image (pixmap) at 300 DPI
-                        pix = page.get_pixmap(dpi=300)
-                        # Convert pixmap to numpy array for EasyOCR
-                        import numpy as np
-                        img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
-                        # Run OCR on the image
-                        result = reader.readtext(img_array, detail=0, paragraph=True)
-                        page_text = "\n".join(result)
-                        ocr_text += f"=== Page {page_num+1} ===\n{page_text}\n"
-                        print("✓")
-                    print(f"      ✅ OCR complete!")
-                    text = ocr_text
-                except Exception as ocr_error:
-                    print(f"   ⚠️ OCR failed: {ocr_error}")
-                    # Return whatever text we got from normal extraction
-                    pass
+
+                if USE_AZURE_OCR:
+                    # Use Azure Computer Vision OCR (10-20x faster!)
+                    print(f"      ☁️  Using Azure OCR (1-3 seconds per page)...")
+                    try:
+                        ocr_text = ""
+                        for page_num in range(pdf.page_count):
+                            print(f"      📄 Page {page_num+1}/{pdf.page_count}...", end=" ", flush=True)
+                            page = pdf[page_num]
+                            # Render page to image
+                            pix = page.get_pixmap(dpi=300)
+                            # Convert to bytes (PNG format)
+                            img_bytes = pix.tobytes("png")
+                            # Run Azure OCR
+                            page_text = ocr_image_with_azure(img_bytes)
+                            if page_text:
+                                ocr_text += f"=== Page {page_num+1} ===\n{page_text}\n"
+                                print("✓")
+                            else:
+                                print("⚠️")
+                        print(f"      ✅ Azure OCR complete!")
+                        text = ocr_text
+                    except Exception as ocr_error:
+                        print(f"      ⚠️ Azure OCR failed: {ocr_error}")
+                        print(f"      🔄 Falling back to local OCR...")
+                        # Fall back to local OCR
+                        USE_AZURE_OCR = False  # Temporarily disable for this file
+
+                if not USE_AZURE_OCR or len(text.strip()) < 50:
+                    # Use local EasyOCR (slower but works offline)
+                    print(f"      💻 Using local OCR (10-30 seconds per page)...")
+                    try:
+                        reader = get_ocr_reader()
+                        ocr_text = ""
+                        for page_num in range(pdf.page_count):
+                            print(f"      📄 Page {page_num+1}/{pdf.page_count}...", end=" ", flush=True)
+                            page = pdf[page_num]
+                            # Render page to image (pixmap) at 300 DPI
+                            pix = page.get_pixmap(dpi=300)
+                            # Convert pixmap to numpy array for EasyOCR
+                            import numpy as np
+                            img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+                            # Run OCR on the image
+                            result = reader.readtext(img_array, detail=0, paragraph=True)
+                            page_text = "\n".join(result)
+                            ocr_text += f"=== Page {page_num+1} ===\n{page_text}\n"
+                            print("✓")
+                        print(f"      ✅ Local OCR complete!")
+                        text = ocr_text
+                    except Exception as ocr_error:
+                        print(f"   ⚠️ Local OCR failed: {ocr_error}")
+                        # Return whatever text we got from normal extraction
+                        pass
 
             pdf.close()
             return text.strip()
