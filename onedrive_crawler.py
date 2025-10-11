@@ -737,8 +737,127 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
 
     return processed_count[0]
 
-def list_documents_folder(token, max_files=None, interactive=True):
-    """Recursively crawl Documents folder with interactive folder selection"""
+def discover_all_folders(token, folder_id, folder_path="/Documents", folders_list=None):
+    """Recursively discover all folders in the tree without processing files
+
+    Returns: List of tuples [(folder_path, folder_name, folder_id), ...]
+    """
+    if folders_list is None:
+        folders_list = []
+
+    headers = {"Authorization": f"Bearer {token}"}
+    base_url = "https://graph.microsoft.com/v1.0/me/drive"
+
+    # List items in current folder
+    url = f"{base_url}/items/{folder_id}/children"
+    response = requests.get(url, headers=headers)
+
+    if response.status_code != 200:
+        return folders_list
+
+    items = response.json().get("value", [])
+
+    # Find all subfolders
+    for item in items:
+        if "folder" in item:
+            folder_name = item['name']
+            subfolder_path = f"{folder_path}/{folder_name}"
+            subfolder_id = item['id']
+
+            # Add this folder to the list
+            folders_list.append((subfolder_path, folder_name, subfolder_id))
+
+            # Recursively discover subfolders
+            discover_all_folders(token, subfolder_id, subfolder_path, folders_list)
+
+    return folders_list
+
+def interactive_folder_selection(folders_list, skip_cache):
+    """Present all folders to user and let them choose how to handle each one
+
+    Returns: Updated skip_cache with user preferences
+    """
+    print("\n" + "=" * 60)
+    print("📁 FOLDER SELECTION - Choose how to handle each folder")
+    print("=" * 60)
+    print(f"Found {len(folders_list)} folders in your Documents directory.")
+    print("\nFor each folder, choose:")
+    print("  [y] = Process (extract all file contents)")
+    print("  [l] = List-only (index filenames without extracting)")
+    print("  [n] = Skip (ignore this folder)")
+    print("  [q] = Quick mode - assume 'yes' for all remaining folders")
+    print("=" * 60)
+
+    quick_mode = False
+
+    for idx, (folder_path, folder_name, folder_id) in enumerate(folders_list, 1):
+        # Check if we already have a cached decision
+        if folder_path in skip_cache:
+            decision = skip_cache[folder_path]
+            status = {"process": "✅ PROCESS", "list-only": "📋 LIST-ONLY", "skip": "⏭️  SKIP"}[decision]
+            print(f"\n[{idx}/{len(folders_list)}] {folder_name}/")
+            print(f"   Path: {folder_path}")
+            print(f"   {status} (cached)")
+            continue
+
+        # In quick mode, default to process
+        if quick_mode:
+            skip_cache[folder_path] = "process"
+            print(f"\n[{idx}/{len(folders_list)}] {folder_name}/ → ✅ PROCESS (quick mode)")
+            continue
+
+        # Ask user
+        print(f"\n[{idx}/{len(folders_list)}] {folder_name}/")
+        print(f"   Path: {folder_path}")
+
+        while True:
+            choice = input("   Choice [y/l/n/q]: ").lower().strip()
+
+            if choice in ['y', 'yes', '']:
+                skip_cache[folder_path] = "process"
+                print("   → ✅ Will PROCESS this folder")
+                break
+            elif choice in ['l', 'list', 'list-only']:
+                skip_cache[folder_path] = "list-only"
+                print("   → 📋 Will LIST-ONLY this folder")
+                break
+            elif choice in ['n', 'no', 'skip']:
+                skip_cache[folder_path] = "skip"
+                print("   → ⏭️  Will SKIP this folder")
+                break
+            elif choice in ['q', 'quick']:
+                skip_cache[folder_path] = "process"
+                quick_mode = True
+                print("   → ✅ Will PROCESS this folder")
+                print("   🚀 Quick mode enabled - all remaining folders will be processed")
+                break
+            else:
+                print("   Invalid choice, please enter y/l/n/q")
+
+    # Save updated cache
+    save_folder_skip_cache(skip_cache)
+
+    print("\n" + "=" * 60)
+    print("✅ Folder selection complete!")
+
+    # Show summary
+    process_count = sum(1 for v in skip_cache.values() if v == "process")
+    list_count = sum(1 for v in skip_cache.values() if v == "list-only")
+    skip_count = sum(1 for v in skip_cache.values() if v == "skip")
+
+    print(f"   ✅ Process: {process_count} folders")
+    print(f"   📋 List-only: {list_count} folders")
+    print(f"   ⏭️  Skip: {skip_count} folders")
+    print("=" * 60)
+
+    return skip_cache
+
+def list_documents_folder(token, max_files=None, interactive=True, preflight=True):
+    """Recursively crawl Documents folder with interactive folder selection
+
+    Args:
+        preflight: If True, discover all folders first and let user choose before crawling
+    """
     headers = {"Authorization": f"Bearer {token}"}
     base_url = "https://graph.microsoft.com/v1.0/me/drive"
 
@@ -753,6 +872,19 @@ def list_documents_folder(token, max_files=None, interactive=True):
 
     # Load folder skip cache
     skip_cache = load_folder_skip_cache()
+
+    # PREFLIGHT MODE: Discover all folders first, let user choose
+    if preflight and interactive:
+        print(f"🔍 Discovering all folders in Documents directory...")
+        folders_list = discover_all_folders(token, folder_id, "/Documents")
+        print(f"✅ Found {len(folders_list)} folders\n")
+
+        # Let user select how to handle each folder
+        skip_cache = interactive_folder_selection(folders_list, skip_cache)
+
+        print("\n🚀 Starting crawl with your folder preferences...\n")
+        # Now interactive is False for the actual crawl (decisions already made)
+        interactive = False
 
     # Initialize tracking
     extracted_files = []
