@@ -259,11 +259,39 @@ def extract_text_from_file(token, file_item):
     
     if not download_url:
         return None
-    
-    # Download file content
-    response = requests.get(download_url)
-    if response.status_code != 200:
-        return None
+
+    # Download file content with retry logic
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(download_url, timeout=60)  # 60 second timeout
+            if response.status_code == 200:
+                break
+            elif attempt < max_retries - 1:
+                print(f"   ⚠️ Download failed (HTTP {response.status_code}), retrying... ({attempt + 1}/{max_retries})")
+                continue
+            else:
+                return None
+        except (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError) as e:
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 2  # Exponential backoff: 2s, 4s, 6s
+                print(f"   ⚠️ Connection error, retrying in {wait_time}s... ({attempt + 1}/{max_retries})")
+                import time
+                time.sleep(wait_time)
+                continue
+            else:
+                print(f"   ❌ Download failed after {max_retries} attempts: {type(e).__name__}")
+                return None
+        except requests.exceptions.Timeout:
+            if attempt < max_retries - 1:
+                print(f"   ⏱️ Download timeout, retrying... ({attempt + 1}/{max_retries})")
+                continue
+            else:
+                print(f"   ❌ Download timeout after {max_retries} attempts")
+                return None
+        except Exception as e:
+            print(f"   ❌ Unexpected download error: {e}")
+            return None
     
     file_name = file_item["name"].lower()
     content = response.content
