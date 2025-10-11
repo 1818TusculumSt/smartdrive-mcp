@@ -820,6 +820,7 @@ def interactive_folder_selection(folders_list, skip_cache):
 
     quick_mode = False
     excluded_prefixes = []  # Track folders that should auto-skip their subfolders
+    included_prefixes = []  # Track folders that should auto-process their subfolders
 
     for idx, (folder_path, folder_name, folder_id) in enumerate(folders_list, 1):
         # Check if this folder is under an excluded parent
@@ -827,6 +828,13 @@ def interactive_folder_selection(folders_list, skip_cache):
         if is_subfolder_of_excluded:
             skip_cache[folder_path] = "skip"
             print(f"\n[{idx}/{len(folders_list)}] {folder_name}/ → ⏭️  SKIP (parent excluded)")
+            continue
+
+        # Check if this folder is under an included parent
+        is_subfolder_of_included = any(folder_path.startswith(prefix + "/") for prefix in included_prefixes)
+        if is_subfolder_of_included:
+            skip_cache[folder_path] = "process"
+            print(f"\n[{idx}/{len(folders_list)}] {folder_name}/ → ✅ PROCESS (parent included)")
             continue
 
         # Check if we already have a cached decision
@@ -852,8 +860,14 @@ def interactive_folder_selection(folders_list, skip_cache):
             choice = input("   Choice [y/l/n/x/q]: ").lower().strip()
 
             if choice in ['y', 'yes', '']:
+                # Count how many subfolders will be auto-processed
+                subfolder_count = sum(1 for p, _, _ in folders_list[idx:] if p.startswith(folder_path + "/"))
                 skip_cache[folder_path] = "process"
-                print("   → ✅ Will PROCESS this folder")
+                included_prefixes.append(folder_path)  # Mark for auto-processing subfolders
+                if subfolder_count > 0:
+                    print(f"   → ✅ Will PROCESS this folder + {subfolder_count} subfolders")
+                else:
+                    print("   → ✅ Will PROCESS this folder")
                 break
             elif choice in ['l', 'list', 'list-only']:
                 skip_cache[folder_path] = "list-only"
