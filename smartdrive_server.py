@@ -3,19 +3,20 @@ import json
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from pinecone import Pinecone
-from sentence_transformers import SentenceTransformer
+from embeddings import EmbeddingProvider
+from config import settings
 
 # Don't load .env - use environment vars from Claude config
 # load_dotenv()  # REMOVE THIS LINE
 
 # Initialize
 app = Server("smartdrive-mcp")
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+pc = Pinecone(api_key=settings.PINECONE_API_KEY)
 index = pc.Index(
-    name=os.getenv("PINECONE_INDEX_NAME"),
-    host=os.getenv("PINECONE_HOST")
+    name=settings.PINECONE_INDEX_NAME,
+    host=settings.PINECONE_HOST
 )
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+embedding_provider = EmbeddingProvider()
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -48,9 +49,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if name == "search_onedrive":
         query = arguments["query"]
         top_k = arguments.get("top_k", 5)
-        
+
         # Generate query embedding
-        query_embedding = embedding_model.encode(query).tolist()
+        query_embedding = await embedding_provider.get_embedding(query)
+
+        if query_embedding is None:
+            return [TextContent(
+                type="text",
+                text="❌ Failed to generate embedding for query."
+            )]
+
+        query_embedding = query_embedding.tolist()
         
         # Search Pinecone
         results = index.query(

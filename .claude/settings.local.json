@@ -3,7 +3,10 @@
     "allow": [
       "Bash(./venv/Scripts/python.exe:*)",
       "Bash(git pull:*)",
-      "Read(//c/Obsidian/Obsidian Vault/**)"
+      "Read(//c/Obsidian/Obsidian Vault/**)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []
