@@ -700,7 +700,26 @@ if __name__ == "__main__":
             # Run crawler
             print("\n" + "=" * 60)
 
+            # Ask about clearing the index
+            print("🗑️  Index Management:")
+            print("   - Press Enter to ADD to existing index (default)")
+            print("   - Type 'clear' to CLEAR index before indexing (fresh start)")
+            clear_choice = input("Index mode: ").strip().lower()
+
+            if clear_choice == "clear":
+                print("\n⚠️  WARNING: This will DELETE all existing vectors in the 'smartdrive' namespace!")
+                confirm = input("Are you sure? Type 'yes' to confirm: ").strip().lower()
+                if confirm == "yes":
+                    print("🗑️  Clearing index...")
+                    index.delete(delete_all=True, namespace="smartdrive")
+                    print("✅ Index cleared!\n")
+                else:
+                    print("❌ Clear cancelled, will add to existing index\n")
+            else:
+                print("✅ Will add to existing index (default)\n")
+
             # Ask about ZIP file handling
+            print("=" * 60)
             print("📦 ZIP File Handling:")
             print("   - Press Enter to LIST zip contents (default, faster)")
             print("   - Type 'extract' to EXTRACT and index files inside zips (slower)")
