@@ -754,13 +754,20 @@ def discover_all_folders(token, folder_id, folder_path="/Documents", folders_lis
     try:
         response = requests.get(url, headers=headers, timeout=10)  # 10 second timeout
     except requests.exceptions.Timeout:
-        print(f"   ⏱️ Timeout accessing {folder_path}, skipping...")
-        return folders_list
+        print(f"   ⏱️ Timeout on {folder_path} (>10s), retrying with 30s timeout...")
+        try:
+            response = requests.get(url, headers=headers, timeout=30)  # Retry with longer timeout
+        except:
+            print(f"   ❌ Still timeout. This folder's subfolders won't be discovered.")
+            # Note: The folder itself is already in the list, just can't get its subfolders
+            return folders_list
     except requests.exceptions.RequestException as e:
-        print(f"   ⚠️ Error accessing {folder_path}: {str(e)[:100]}")
+        print(f"   ⚠️ Network error on {folder_path}: {str(e)[:80]}")
+        print(f"   ⚠️ This folder's subfolders won't be discovered, but you can still choose it.")
         return folders_list
 
     if response.status_code != 200:
+        print(f"   ⚠️ API error {response.status_code} on {folder_path}")
         return folders_list
 
     items = response.json().get("value", [])
