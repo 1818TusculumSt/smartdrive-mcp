@@ -417,15 +417,32 @@ def extract_text_from_file(token, file_item):
 
         # Image extraction with OCR
         elif file_name.endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif', '.img')):
-            import numpy as np
-            reader = get_ocr_reader()
-            image = Image.open(io.BytesIO(content))
-            # Convert PIL image to numpy array
-            img_array = np.array(image)
-            # Run OCR
-            result = reader.readtext(img_array, detail=0, paragraph=True)
-            text = "\n".join(result)
-            return text.strip() if text.strip() else None
+            azure_ocr_succeeded = False
+
+            if USE_AZURE_OCR:
+                # Try Azure OCR first (10-20x faster!)
+                print(f"   ☁️  Using Azure OCR...")
+                try:
+                    text = ocr_image_with_azure(content)
+                    if text:
+                        azure_ocr_succeeded = True
+                        return text.strip()
+                except Exception as azure_error:
+                    print(f"   ⚠️ Azure OCR failed: {azure_error}")
+                    print(f"   🔄 Falling back to local OCR...")
+
+            if not azure_ocr_succeeded:
+                # Use local EasyOCR as fallback
+                print(f"   💻 Using local OCR...")
+                import numpy as np
+                reader = get_ocr_reader()
+                image = Image.open(io.BytesIO(content))
+                # Convert PIL image to numpy array
+                img_array = np.array(image)
+                # Run OCR
+                result = reader.readtext(img_array, detail=0, paragraph=True)
+                text = "\n".join(result)
+                return text.strip() if text.strip() else None
 
         # Plain text
         elif file_name.endswith('.txt'):
