@@ -1,0 +1,40 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env.local
+.env.*.local
+
+# Cache files
+*.cache
+.DS_Store
+
+# Logs
+*.log
+
+# Documentation (not needed in container)
+*.md
+!README.md
+SETUP_OCR.md
+
+# Other
+.dockerignore
+Dockerfile
+docker-compose.yml

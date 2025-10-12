@@ -152,6 +152,95 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 
 ---
 
+## 🐳 Docker Setup (Recommended)
+
+**Why Docker?**
+- ✅ **Zero system pollution** - isolated environment
+- ✅ **No dependency conflicts** - all Python packages contained
+- ✅ **Reproducible** - works identically everywhere
+- ✅ **Easy cleanup** - remove container, done
+- ✅ **Persistent cache** - OAuth tokens and folder choices survive restarts
+
+### Docker Quick Start
+
+1. **Clone and configure**
+   ```bash
+   git clone https://github.com/1818TusculumSt/smartdrive-mcp.git
+   cd smartdrive-mcp
+   cp .env.example .env
+   # Edit .env with your credentials
+   ```
+
+2. **Build and run**
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Index your OneDrive (first time)**
+   ```bash
+   docker-compose run --rm smartdrive-mcp python onedrive_crawler.py
+   ```
+
+4. **Subsequent runs** (use cached folder choices)
+   ```bash
+   docker-compose run --rm smartdrive-mcp
+   ```
+
+### Docker Commands
+
+```bash
+# Build the image
+docker-compose build
+
+# Run crawler interactively
+docker-compose run --rm smartdrive-mcp
+
+# View logs
+docker-compose logs -f
+
+# Stop container
+docker-compose down
+
+# Rebuild after code changes
+docker-compose build --no-cache
+
+# Clean up everything (keeps .env and cache files)
+docker-compose down --rmi all
+```
+
+### Cache Persistence
+
+Docker automatically mounts these cache files from your host:
+- `~/.smartdrive_token_cache.json` - OAuth tokens (survives restarts)
+- `~/.smartdrive_folder_skip_cache.json` - Folder choices (remembers skip/process decisions)
+- `~/.EasyOCR/` - OCR models (avoids re-downloading 100MB)
+
+### Using with Claude Desktop
+
+Point Claude Desktop to the Docker container's MCP server:
+
+```json
+{
+  "mcpServers": {
+    "smartdrive": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "--env-file",
+        "/path/to/smartdrive-mcp/.env",
+        "smartdrive-mcp",
+        "python",
+        "server.py"
+      ]
+    }
+  }
+}
+```
+
+---
+
 ## 🚀 Usage
 
 ### In Claude Desktop
