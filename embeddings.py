@@ -15,6 +15,7 @@ class EmbeddingProvider:
     - Local: sentence-transformers models (default: all-MiniLM-L6-v2)
     - API: OpenAI-compatible embedding endpoints
     - Pinecone: Pinecone's integrated inference API
+    - Voyage: Voyage AI embeddings (32K token context, 2048 dims)
     """
 
     def __init__(self):
@@ -28,8 +29,10 @@ class EmbeddingProvider:
             self._validate_api_config()
         elif self.provider_type == "pinecone":
             self._validate_pinecone_config()
+        elif self.provider_type == "voyage":
+            self._validate_voyage_config()
         else:
-            raise ValueError(f"Invalid EMBEDDING_PROVIDER: {self.provider_type}. Must be 'local', 'api', or 'pinecone'")
+            raise ValueError(f"Invalid EMBEDDING_PROVIDER: {self.provider_type}. Must be 'local', 'api', 'pinecone', or 'voyage'")
 
     def _init_local_model(self):
         """Initialize local sentence-transformer model"""
@@ -54,6 +57,12 @@ class EmbeddingProvider:
         if not settings.PINECONE_API_KEY:
             raise ValueError("PINECONE_API_KEY required for Pinecone inference")
         logger.info(f"Using Pinecone inference with model: {settings.EMBEDDING_MODEL}")
+
+    def _validate_voyage_config(self):
+        """Validate Voyage AI configuration"""
+        if not settings.VOYAGE_API_KEY:
+            raise ValueError("VOYAGE_API_KEY required for Voyage AI")
+        logger.info(f"Using Voyage AI with model: {settings.VOYAGE_MODEL}")
 
     def get_embedding_sync(self, text: str) -> Optional[np.ndarray]:
         """
@@ -95,6 +104,8 @@ class EmbeddingProvider:
                 return await self._get_api_embedding(text)
             elif self.provider_type == "pinecone":
                 return await self._get_pinecone_embedding(text)
+            elif self.provider_type == "voyage":
+                return await self._get_voyage_embedding(text)
             else:
                 logger.error(f"Invalid embedding provider: {self.provider_type}")
                 return None
@@ -260,6 +271,82 @@ class EmbeddingProvider:
             return None
         except Exception as e:
             logger.error(f"Unexpected error in API embedding: {e}", exc_info=True)
+            return None
+
+    async def _get_voyage_embedding(self, text: str) -> Optional[np.ndarray]:
+        """
+        Get embedding from Voyage AI API.
+
+        Supports:
+        - 32,000 token context window (128K chars!)
+        - 2048 dimensions for maximum quality
+        - voyage-3-large model optimized for long documents
+
+        Args:
+            text: Text to embed (up to 32K tokens)
+
+        Returns:
+            Normalized embedding vector or None on error
+        """
+        if not self._session:
+            self._session = aiohttp.ClientSession()
+
+        url = "https://api.voyageai.com/v1/embeddings"
+
+        headers = {
+            "Authorization": f"Bearer {settings.VOYAGE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        data = {
+            "input": [text],
+            "model": settings.VOYAGE_MODEL,
+            "input_type": "document",  # For indexing documents
+            "output_dimension": 2048  # Maximum quality
+        }
+
+        try:
+            async with self._session.post(
+                url,
+                json=data,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=settings.EMBEDDING_TIMEOUT)
+            ) as response:
+
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Voyage AI API error {response.status}: {error_text}")
+                    return None
+
+                result = await response.json()
+
+                if not result.get("data") or len(result["data"]) == 0:
+                    logger.error(f"Invalid Voyage AI response: {result}")
+                    return None
+
+                embedding_list = result["data"][0].get("embedding")
+
+                if not embedding_list or not isinstance(embedding_list, list):
+                    logger.error("Invalid Voyage AI response: missing embedding array")
+                    return None
+
+                embedding = np.array(embedding_list, dtype=np.float32)
+
+                # Voyage embeddings are already normalized
+                norm = np.linalg.norm(embedding)
+                if norm > 1e-6:
+                    embedding = embedding / norm
+                else:
+                    logger.warning("Embedding has near-zero norm, cannot normalize")
+
+                logger.debug(f"Generated Voyage AI embedding (dim: {len(embedding)})")
+                return embedding
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Voyage AI API request failed: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error in Voyage AI embedding: {e}", exc_info=True)
             return None
 
     async def close(self):

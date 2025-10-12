@@ -697,9 +697,11 @@ def upload_to_pinecone(files_data, check_existing=True):
             skipped_count += 1
             continue
 
-        # Truncate for embedding (llama-text-embed-v2 handles up to 8192 tokens)
-        # Estimate ~4 chars per token, so 32000 chars ≈ 8000 tokens with margin
-        text_for_embedding = full_text[:32000]
+        # Truncate for embedding based on provider limits
+        # Voyage AI: 32K tokens = ~128K chars (entire 50+ page PDFs!)
+        # Pinecone llama: 2048 tokens = ~8K chars
+        # Default to 128K for maximum document coverage with Voyage
+        text_for_embedding = full_text[:128000]
 
         # Generate embedding
         embedding = embedding_provider.get_embedding_sync(text_for_embedding)

@@ -21,10 +21,14 @@ class Settings(BaseSettings):
     MICROSOFT_TENANT_ID: Optional[str] = None
 
     # Embedding Provider Configuration
-    EMBEDDING_PROVIDER: str = "local"  # Options: "local", "api", or "pinecone"
+    EMBEDDING_PROVIDER: str = "local"  # Options: "local", "api", "pinecone", or "voyage"
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     EMBEDDING_API_URL: Optional[str] = None
     EMBEDDING_API_KEY: Optional[str] = None
+
+    # Voyage AI Configuration
+    VOYAGE_API_KEY: Optional[str] = None
+    VOYAGE_MODEL: str = "voyage-3-large"
 
     # Performance Settings
     EMBEDDING_TIMEOUT: int = 30
@@ -42,10 +46,10 @@ class Settings(BaseSettings):
         """Validate settings and log warnings for potential issues"""
 
         # Validate embedding provider
-        if self.EMBEDDING_PROVIDER not in ["local", "api", "pinecone"]:
+        if self.EMBEDDING_PROVIDER not in ["local", "api", "pinecone", "voyage"]:
             logger.warning(
                 f"Invalid EMBEDDING_PROVIDER '{self.EMBEDDING_PROVIDER}'. "
-                f"Defaulting to 'local'. Valid options: 'local', 'api', 'pinecone'"
+                f"Defaulting to 'local'. Valid options: 'local', 'api', 'pinecone', 'voyage'"
             )
             self.EMBEDDING_PROVIDER = "local"
 
@@ -65,6 +69,13 @@ class Settings(BaseSettings):
             if not self.PINECONE_API_KEY:
                 raise ValueError(
                     "PINECONE_API_KEY is required when EMBEDDING_PROVIDER='pinecone'"
+                )
+
+        # Validate Voyage AI embedding config
+        if self.EMBEDDING_PROVIDER == "voyage":
+            if not self.VOYAGE_API_KEY:
+                raise ValueError(
+                    "VOYAGE_API_KEY is required when EMBEDDING_PROVIDER='voyage'"
                 )
 
         # Log configuration
