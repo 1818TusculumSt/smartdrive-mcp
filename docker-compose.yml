@@ -1,0 +1,41 @@
+# SmartDrive MCP - Docker Compose Configuration
+# Manages environment variables, volumes, and networking
+
+version: '3.8'
+
+services:
+  smartdrive-mcp:
+    build: .
+    container_name: smartdrive-mcp
+
+    # Mount .env file for secrets
+    env_file:
+      - .env
+
+    # Mount cache directories for persistence
+    volumes:
+      # OAuth token cache (survives container restarts)
+      - ~/.smartdrive_token_cache.json:/root/.smartdrive_token_cache.json
+
+      # Folder skip cache (remembers folder choices)
+      - ~/.smartdrive_folder_skip_cache.json:/root/.smartdrive_folder_skip_cache.json
+
+      # EasyOCR models cache (avoid re-downloading 100MB models)
+      - ~/.EasyOCR:/root/.EasyOCR
+
+    # Interactive terminal (for OAuth flow)
+    stdin_open: true
+    tty: true
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Resource limits (optional - adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
