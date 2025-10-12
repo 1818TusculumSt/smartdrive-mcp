@@ -371,9 +371,13 @@ def extract_text_from_file(token, file_item):
 
         # Word doc extraction (.docx)
         elif file_name.endswith('.docx'):
-            doc = Document(io.BytesIO(content))
-            text = "\n".join([para.text for para in doc.paragraphs])
-            return text.strip()
+            try:
+                doc = Document(io.BytesIO(content))
+                text = "\n".join([para.text for para in doc.paragraphs])
+                return text.strip()
+            except Exception as docx_error:
+                print(f"   ⚠️ Word document parsing failed: {docx_error}")
+                return None
 
         # Legacy Word doc extraction (.doc)
         elif file_name.endswith('.doc'):
@@ -472,7 +476,7 @@ def extract_text_from_file(token, file_item):
                 return None
 
         # Image extraction with OCR
-        elif file_name.endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif', '.img')):
+        elif file_name.endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
             azure_ocr_succeeded = False
 
             if USE_AZURE_OCR:
@@ -1065,7 +1069,7 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
             })
         elif text is None:
             supported_extensions = ['pdf', 'docx', 'doc', 'pptx', 'xlsx', 'xlsm', 'xltx', 'xltm',
-                                   'png', 'jpg', 'jpeg', 'tiff', 'bmp', 'gif', 'img', 'txt', 'csv', 'json', 'md', 'markdown', 'zip']
+                                   'png', 'jpg', 'jpeg', 'tiff', 'bmp', 'gif', 'txt', 'csv', 'json', 'md', 'markdown', 'zip']
             if file_ext in supported_extensions:
                 failed_files.append((file_name, file_ext))
                 print(f"   ❌ Failed to extract (see error above)")
