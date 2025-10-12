@@ -121,14 +121,39 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "full_text": full_text
                     }
 
-        # Format output with full documents
+        # Format output with document summaries (prevent 1MB limit issues)
+        MAX_PREVIEW_CHARS = 2000  # Show first 2000 chars per document
+        MAX_TOTAL_SIZE = 900_000  # Keep total response under 900KB (well below 1MB limit)
+
+        current_size = len(output)
+
         for i, (doc_id, doc_info) in enumerate(doc_results.items(), 1):
-            output += f"**Result {i}** (Score: {doc_info['score']:.3f})\n"
-            output += f"📄 **File:** {doc_info['file_name']}\n"
-            output += f"📁 **Path:** {doc_info['file_path']}\n"
-            output += f"📅 **Modified:** {doc_info['modified']}\n"
-            output += f"📝 **Content:**\n{doc_info['full_text']}\n\n"
-            output += "---\n\n"
+            full_text = doc_info['full_text']
+            text_length = len(full_text)
+
+            # Truncate if needed
+            if text_length > MAX_PREVIEW_CHARS:
+                preview_text = full_text[:MAX_PREVIEW_CHARS] + f"\n\n... [Truncated: {text_length - MAX_PREVIEW_CHARS:,} more characters in full document]"
+            else:
+                preview_text = full_text
+
+            result_block = (
+                f"**Result {i}** (Score: {doc_info['score']:.3f})\n"
+                f"📄 **File:** {doc_info['file_name']}\n"
+                f"📁 **Path:** {doc_info['file_path']}\n"
+                f"📅 **Modified:** {doc_info['modified']}\n"
+                f"📊 **Size:** {text_length:,} characters\n"
+                f"📝 **Preview:**\n{preview_text}\n\n"
+                f"---\n\n"
+            )
+
+            # Check if adding this result would exceed total size limit
+            if current_size + len(result_block) > MAX_TOTAL_SIZE:
+                output += f"\n⚠️ **Remaining results omitted** (response size limit reached)\n"
+                break
+
+            output += result_block
+            current_size += len(result_block)
 
         return [TextContent(type="text", text=output)]
     
