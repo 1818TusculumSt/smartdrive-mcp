@@ -383,7 +383,9 @@ def extract_text_from_file(token, file_item):
                 return text.strip()
             except Exception as docx_error:
                 print(f"   ⚠️ Word document parsing failed: {docx_error}")
-                return None
+                print(f"   📋 Indexing with metadata only (corrupted/malformed file)")
+                # Return metadata so file is still searchable
+                return f"File: {file_item['name']}\nType: Word Document (.docx)\nNote: File corrupted or malformed - could not extract text"
 
         # Legacy Word doc extraction (.doc)
         elif file_name.endswith('.doc'):
@@ -404,11 +406,14 @@ def extract_text_from_file(token, file_item):
                     return text.strip() if len(text.strip()) > 20 else None
                 else:
                     print(f"   ⚠️ Not a valid .doc file")
+                    print(f"   📋 Indexing with metadata only")
                     ole.close()
-                    return None
+                    return f"File: {file_item['name']}\nType: Legacy Word Document (.doc)\nNote: Invalid OLE2 file structure - could not extract text"
             except Exception as e:
                 print(f"   ⚠️ Failed to parse .doc file: {e}")
-                return None
+                print(f"   📋 Indexing with metadata only (corrupted/malformed file)")
+                # Return metadata so file is still searchable
+                return f"File: {file_item['name']}\nType: Legacy Word Document (.doc)\nNote: File corrupted or malformed - could not extract text"
 
         # PowerPoint extraction (.pptx)
         elif file_name.endswith('.pptx'):
