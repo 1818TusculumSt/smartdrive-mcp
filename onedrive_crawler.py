@@ -518,6 +518,14 @@ def extract_text_from_file(token, file_item):
         # Image extraction with OCR
         elif file_name.endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
             azure_ocr_succeeded = False
+            # Try Document Intelligence first if applicable
+            if should_use_document_intelligence(file_name):
+                doc_intel_text = extract_with_document_intelligence(content)
+                if doc_intel_text and len(doc_intel_text.strip()) >= 50:
+                    return doc_intel_text.strip()
+                else:
+                    print(f"      🔄 Falling back to regular OCR...")
+
 
             if USE_AZURE_OCR:
                 # Try Azure OCR first (10-20x faster!)

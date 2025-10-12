@@ -58,16 +58,19 @@ def extract_with_document_intelligence(file_bytes):
         poller = form_recognizer_client.begin_analyze_document(
             "prebuilt-document", document=BytesIO(file_bytes)
         )
-        result = poller.result()
+        result = poller.result(timeout=120)  # 2 minute timeout
 
         # Extract all text with structure
         text_parts = []
 
-        # Extract content from pages
+        # Extract content from pages with progress indicator
+        total_pages = len(result.pages)
         for page in result.pages:
+            print(f"      📄 Page {page.page_number}/{total_pages}...", end=" ", flush=True)
             text_parts.append(f"=== Page {page.page_number} ===")
             for line in page.lines:
                 text_parts.append(line.content)
+            print("✓")
 
         # Extract tables if present
         if result.tables:
