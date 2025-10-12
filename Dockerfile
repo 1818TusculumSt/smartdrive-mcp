@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY onedrive_crawler.py .
 COPY embeddings.py .
 COPY config.py .
-COPY server.py .
+COPY smartdrive_server.py .
 
 # Create directories for cache files
 RUN mkdir -p /root/.cache

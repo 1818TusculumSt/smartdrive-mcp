@@ -232,7 +232,7 @@ Point Claude Desktop to the Docker container's MCP server:
         "/path/to/smartdrive-mcp/.env",
         "smartdrive-mcp",
         "python",
-        "server.py"
+        "smartdrive_server.py"
       ]
     }
   }
