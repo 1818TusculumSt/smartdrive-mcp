@@ -65,8 +65,13 @@ AZURE_VISION_KEY = os.getenv("AZURE_VISION_KEY")
 AZURE_VISION_ENDPOINT = os.getenv("AZURE_VISION_ENDPOINT")
 USE_AZURE_OCR = bool(AZURE_VISION_KEY and AZURE_VISION_ENDPOINT)
 
+# OCR strict mode: If true, ONLY use Azure OCR (no EasyOCR fallback)
+OCR_STRICT_MODE = os.getenv("OCR_STRICT_MODE", "false").lower() == "true"
+
 if USE_AZURE_OCR:
     print("☁️  Azure Computer Vision OCR enabled (10-20x faster than local!)")
+    if OCR_STRICT_MODE:
+        print("⚠️  STRICT MODE: EasyOCR fallback disabled - files will fail if Azure fails")
     from azure.ai.vision.imageanalysis import ImageAnalysisClient
     from azure.ai.vision.imageanalysis.models import VisualFeatures
     from azure.core.credentials import AzureKeyCredential
@@ -344,9 +349,20 @@ def extract_text_from_file(token, file_item):
                         azure_ocr_succeeded = True
                     except Exception as ocr_error:
                         print(f"      ⚠️ Azure OCR failed: {ocr_error}")
-                        print(f"      🔄 Falling back to local OCR...")
+                        if OCR_STRICT_MODE:
+                            print(f"      ❌ STRICT MODE: No fallback - file extraction failed")
+                            pdf.close()
+                            return None
+                        else:
+                            print(f"      🔄 Falling back to local OCR...")
 
                 if not azure_ocr_succeeded and len(text.strip()) < 50:
+                    if OCR_STRICT_MODE:
+                        # Strict mode: no EasyOCR fallback
+                        print(f"      ❌ STRICT MODE: Azure OCR not available or failed - skipping file")
+                        pdf.close()
+                        return None
+
                     # Use local EasyOCR (slower but works offline)
                     print(f"      💻 Using local OCR (10-30 seconds per page)...")
                     try:
@@ -502,9 +518,18 @@ def extract_text_from_file(token, file_item):
                         return text.strip()
                 except Exception as azure_error:
                     print(f"   ⚠️ Azure OCR failed: {azure_error}")
-                    print(f"   🔄 Falling back to local OCR...")
+                    if OCR_STRICT_MODE:
+                        print(f"   ❌ STRICT MODE: No fallback - file extraction failed")
+                        return None
+                    else:
+                        print(f"   🔄 Falling back to local OCR...")
 
             if not azure_ocr_succeeded:
+                if OCR_STRICT_MODE:
+                    # Strict mode: no EasyOCR fallback
+                    print(f"   ❌ STRICT MODE: Azure OCR not available or failed - skipping file")
+                    return None
+
                 # Use local EasyOCR as fallback
                 print(f"   💻 Using local OCR...")
                 import numpy as np
