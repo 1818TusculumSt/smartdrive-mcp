@@ -1086,6 +1086,9 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
             )
         # else: skip - do nothing
 
+    # Collect files from THIS folder only (for folder-by-folder upload)
+    current_folder_files = []
+
     # Process files in current folder
     for item in files:
         if processed_count[0] >= max_files:
@@ -1126,13 +1129,15 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
 
         if text:
             print(f"   ✅ Extracted {len(text)} characters")
-            extracted_files.append({
+            file_data = {
                 "name": file_name,
                 "path": f"{folder_path}/{file_name}",
                 "text": text,
                 "size": item.get("size", 0),
                 "modified": item.get("lastModifiedDateTime", "")
-            })
+            }
+            current_folder_files.append(file_data)
+            extracted_files.append(file_data)  # Keep for summary
         elif text is None:
             supported_extensions = ['pdf', 'docx', 'doc', 'pptx', 'xlsx', 'xlsm', 'xltx', 'xltm',
                                    'png', 'jpg', 'jpeg', 'tiff', 'bmp', 'gif', 'txt', 'csv', 'json', 'md', 'markdown', 'zip']
@@ -1152,15 +1157,27 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
                 metadata_text += f"Size: {file_size_mb:.2f} MB ({file_size_bytes:,} bytes)\n"
                 metadata_text += f"Location: {folder_path}/{file_name}"
 
-                extracted_files.append({
+                file_data = {
                     "name": file_name,
                     "path": f"{folder_path}/{file_name}",
                     "text": metadata_text,
                     "size": item.get("size", 0),
                     "modified": item.get("lastModifiedDateTime", "")
-                })
+                }
+                current_folder_files.append(file_data)
+                extracted_files.append(file_data)  # Keep for summary
 
         processed_count[0] += 1
+
+    # FOLDER-BY-FOLDER UPLOAD: Upload files from THIS folder immediately
+    if current_folder_files:
+        print(f"\n📤 Uploading {len(current_folder_files)} files from {folder_path}...")
+        try:
+            upload_to_pinecone(current_folder_files, check_existing=False)  # Already checked during extraction
+            print(f"✅ Folder {folder_path} indexed successfully!\n")
+        except Exception as upload_error:
+            print(f"❌ Upload failed for folder {folder_path}: {upload_error}")
+            print(f"   Continuing with next folder...\n")
 
     return processed_count[0]
 
@@ -1744,8 +1761,8 @@ if __name__ == "__main__":
         else:
             print("\n❌ Invalid choice, please try again.\n")
 
-    if files:
-        upload_to_pinecone(files)
+    # No need for final upload - already uploaded folder-by-folder during crawl!
+    # Files list kept for summary display only
 
     # Clean up embedding provider sessions
     print("\n🧹 Cleaning up...")
