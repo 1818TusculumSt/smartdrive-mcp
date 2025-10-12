@@ -29,9 +29,11 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 - **Archives**: ZIP files (list contents or extract and index)
 - **Graceful Fallbacks**: Corrupted/malformed files indexed with metadata only
 
-### OCR Support
+### OCR & Document Intelligence
 - **Local OCR**: EasyOCR for scanned PDFs and images (free, no external software!)
 - **Cloud OCR**: Azure Computer Vision for 10-20x faster processing (optional)
+- **Azure Document Intelligence**: Premium AI for forms, tables, invoices, receipts with handwriting support
+- **Flexible Modes**: Never, selective (smart detection), or always use Document Intelligence
 - **No Setup Required**: Local OCR works out of the box
 - **Smart Detection**: Automatically detects scanned PDFs and applies OCR
 
@@ -435,6 +437,95 @@ When enabled:
 
 SmartDrive will automatically use Azure OCR if credentials are provided, otherwise falls back to local EasyOCR (unless strict mode is enabled).
 
+### Azure Document Intelligence (Advanced)
+
+Azure Document Intelligence (formerly Form Recognizer) is a premium AI service that provides advanced extraction capabilities beyond basic OCR. It's specifically designed for structured documents like forms, invoices, receipts, and tax documents.
+
+**What It Does:**
+- **Intelligent form extraction**: Automatically identifies and extracts key-value pairs from forms
+- **Table extraction**: Preserves table structure with rows, columns, and cell relationships
+- **Handwriting recognition**: Accurately recognizes handwritten text
+- **Layout analysis**: Understands document structure (headers, sections, paragraphs)
+- **Pre-built models**: Optimized for invoices, receipts, tax forms, ID documents
+
+**Three Operating Modes:**
+
+1. **`never` (default)**: Document Intelligence is disabled
+   - Uses standard Azure OCR → EasyOCR fallback chain
+   - Fastest and most cost-effective for simple documents
+
+2. **`selective` (smart detection)**: Automatically enabled for specific document types
+   - Activates when filenames contain keywords: `tax`, `invoice`, `receipt`, `form`, `w2`, `1099`, `w-2`, `1040`
+   - Perfect balance of cost and capability
+   - Recommended for mixed document libraries
+
+3. **`always`**: Uses Document Intelligence for ALL documents
+   - Maximum extraction quality for every file
+   - Higher cost - only use if you need advanced extraction for all documents
+
+**Pricing & Limits:**
+
+**Free Tier (F0):**
+- **Cost**: Free
+- **Limitations**: Only processes **first 2 pages** of multi-page documents
+- **Monthly limit**: 500 pages per month
+- **Speed**: 1 transaction per second (TPS)
+- **Best for**: Testing, small document sets, or documents that are 1-2 pages
+
+**Standard Tier (S0):**
+- **Cost**: **$1.50 per 1,000 pages**
+- **Full document processing**: All pages extracted, no page limits
+- **No monthly limits**: Pay-per-use
+- **Speed**: 15 TPS
+- **Typical cost**: ~$0.75 for 500 pages (vs free tier's first-2-pages limitation)
+- **Recommended for**: Production use, multi-page documents
+
+**Setup Instructions:**
+
+1. Go to [Azure Portal](https://portal.azure.com)
+2. Create a **"Document Intelligence"** resource (or search "Form Recognizer")
+3. Choose tier:
+   - **Free F0**: Testing or 1-2 page documents only
+   - **Standard S0**: Production use with full document extraction
+4. After creation, go to **"Keys and Endpoint"**
+5. Copy **KEY 1** and **Endpoint URL**
+6. Add to your `.env`:
+
+```env
+AZURE_FORM_RECOGNIZER_KEY=your_key_here
+AZURE_FORM_RECOGNIZER_ENDPOINT=https://your-region.cognitiveservices.azure.com/
+
+# Choose your mode:
+USE_DOCUMENT_INTELLIGENCE=selective  # never, selective, or always
+```
+
+**Fallback Chain:**
+
+SmartDrive uses a sophisticated fallback system:
+1. **Azure Document Intelligence** (if enabled and conditions met)
+2. **Azure Computer Vision OCR** (if credentials provided)
+3. **EasyOCR** (local, always available)
+
+**Performance:**
+- **Processing time**: 5-15 seconds per document (varies with page count and complexity)
+- **Timeout**: 2-minute safety timeout prevents hanging on problematic files
+- **Progress indicator**: Real-time page-by-page progress for multi-page documents
+- **Reliability**: Automatic fallback if service is unavailable or times out
+
+**Best Use Cases:**
+- Tax documents (W-2, 1099, 1040 forms)
+- Invoices and receipts with complex layouts
+- Business forms with structured fields
+- Contracts with tables and signatures
+- Handwritten notes and forms
+- Documents requiring precise table extraction
+
+**Tips:**
+- Start with `selective` mode to balance cost and quality
+- Use `always` mode only if you need advanced extraction for every document
+- Free tier (F0) is fine for testing, but upgrade to S0 for production multi-page documents
+- Monitor your usage in Azure Portal to stay within budget
+
 ### Indexing Customization
 
 **File Limits:**
@@ -542,6 +633,10 @@ Open a GitHub issue with:
 - ✅ Voyage AI embedding support (32K token context!)
 - ✅ Pinecone inference with 1024-dim embeddings
 - ✅ Graceful fallbacks for corrupted files
+- ✅ Azure Document Intelligence integration with three modes (never, selective, always)
+- ✅ Image OCR via Document Intelligence (JPG/PNG/TIFF/BMP/GIF)
+- ✅ Page-by-page progress indicator for Document Intelligence extraction
+- ✅ Smart timeout handling (2-minute) for reliability
 
 ### Coming Soon 🚀
 
