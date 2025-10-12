@@ -1324,7 +1324,16 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
     """Recursively crawl Documents folder with interactive folder selection
 
     Args:
+        token: OneDrive access token
+        max_files: Maximum number of files to process (None for unlimited)
+        interactive: If True, asks user about each folder (used when no cache)
         preflight: If True, discover all folders first and let user choose before crawling
+
+    New Folder Detection:
+        When using cached folder choices (interactive=False, preflight=False),
+        automatically detects new folders not in cache and asks user about them
+        before proceeding with the crawl. This gives you control over new folders
+        while keeping speed benefits of cached choices for existing folders.
     """
     headers = {"Authorization": f"Bearer {token}"}
     base_url = "https://graph.microsoft.com/v1.0/me/drive"
@@ -1340,6 +1349,55 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
 
     # Load folder skip cache
     skip_cache = load_folder_skip_cache()
+
+    # NEW FOLDER DETECTION: If we have cached choices but NOT in full preflight mode,
+    # check for new folders not in cache and ask about them
+    if not interactive and not preflight and len(skip_cache) > 0:
+        print(f"🔍 Checking for new folders not in cache...")
+        folders_list, failed_folders = discover_all_folders(token, folder_id, "/Documents")
+
+        # Find folders not in cache
+        new_folders = [(path, name, fid) for path, name, fid in folders_list if path not in skip_cache]
+
+        if new_folders:
+            print(f"✨ Found {len(new_folders)} new folder(s) not in cache!\n")
+            print("=" * 60)
+            print("🆕 NEW FOLDERS DETECTED")
+            print("=" * 60)
+            print("How do you want to handle these new folders?")
+            print("  [y] = Process (extract all file contents)")
+            print("  [l] = List-only (index filenames without extracting)")
+            print("  [n] = Skip (ignore this folder)")
+            print("=" * 60 + "\n")
+
+            # Ask about each new folder
+            for folder_path, folder_name, folder_id_item in new_folders:
+                print(f"📁 New folder: {folder_name}/")
+                print(f"   Path: {folder_path}")
+
+                while True:
+                    choice = input("   Choice [y/l/n]: ").lower().strip()
+
+                    if choice in ['y', 'yes', '']:
+                        skip_cache[folder_path] = "process"
+                        print(f"   → ✅ Will PROCESS this folder\n")
+                        break
+                    elif choice in ['l', 'list', 'list-only']:
+                        skip_cache[folder_path] = "list-only"
+                        print(f"   → 📋 Will LIST-ONLY this folder\n")
+                        break
+                    elif choice in ['n', 'no', 'skip']:
+                        skip_cache[folder_path] = "skip"
+                        print(f"   → ⏭️  Will SKIP this folder\n")
+                        break
+                    else:
+                        print("   Invalid choice, please enter y/l/n")
+
+            # Save updated cache
+            save_folder_skip_cache(skip_cache)
+            print("=" * 60)
+            print("✅ New folder choices saved!")
+            print("=" * 60 + "\n")
 
     # PREFLIGHT MODE: Discover all folders first, let user choose
     if preflight and interactive:
