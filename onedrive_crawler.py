@@ -780,7 +780,7 @@ def upload_to_pinecone(files_data, check_existing=True):
                 "file_path": file_path,
                 "size": file_size,
                 "modified": file_modified,
-                "text_preview": full_text[:2000]  # Store larger preview (first 2000 chars)
+                "text_preview": full_text  # Store FULL text (Pinecone supports up to 40KB)
             }
         })
 
