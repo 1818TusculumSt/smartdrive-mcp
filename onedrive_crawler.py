@@ -47,14 +47,6 @@ index = pc.Index(
 )
 
 # Initialize embedding provider
-<<<<<<< Updated upstream
-if settings.EMBEDDING_PROVIDER == "voyage":
-    print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({settings.VOYAGE_MODEL})...")
-elif settings.EMBEDDING_PROVIDER == "pinecone":
-    print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({settings.EMBEDDING_MODEL})...")
-else:
-    print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({settings.EMBEDDING_MODEL})...")
-=======
 # Show correct model name based on provider
 if settings.EMBEDDING_PROVIDER == "voyage":
     model_display = settings.VOYAGE_MODEL
@@ -62,7 +54,6 @@ else:
     model_display = settings.EMBEDDING_MODEL
 
 print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({model_display})...")
->>>>>>> Stashed changes
 embedding_provider = EmbeddingProvider()
 print("✅ Embedding provider loaded\n")
 
