@@ -1054,7 +1054,33 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
 
         file_name = item['name']
         file_ext = file_name.lower().split('.')[-1] if '.' in file_name else 'no extension'
-        print(f"📄 Processing: {folder_path}/{file_name}")
+        file_path_full = f"{folder_path}/{file_name}"
+        print(f"📄 Processing: {file_path_full}")
+
+        # Check if file already indexed in Pinecone (incremental sync - skip extraction!)
+        file_modified = item.get("lastModifiedDateTime", "")
+        file_size = item.get("size", 0)
+        vector_id = generate_vector_id(file_path_full)
+
+        try:
+            result = index.fetch(ids=[vector_id], namespace="smartdrive")
+            if vector_id in result.get('vectors', {}):
+                # File exists in Pinecone - check if it's changed
+                existing_vector = result['vectors'][vector_id]
+                existing_modified = existing_vector.get('metadata', {}).get('modified', '')
+                existing_size = existing_vector.get('metadata', {}).get('size', 0)
+
+                if existing_modified == file_modified and existing_size == file_size:
+                    # File unchanged - skip extraction entirely!
+                    print(f"   ⏭️  Already indexed (unchanged) - skipping extraction")
+                    processed_count[0] += 1
+                    continue
+                else:
+                    # File changed - will re-extract
+                    print(f"   🔄 File modified - re-indexing")
+        except Exception as e:
+            # File not in Pinecone or error checking - will extract
+            pass
 
         text = extract_text_from_file(token_ref[0], item)
 
