@@ -687,8 +687,17 @@ def upload_to_pinecone(files_data, check_existing=True):
             new_count += 1
             print(f"   ➕ Adding (new): {file_data['name']}")
 
-        # Generate embedding
+        # Skip files with too little content (won't generate useful embeddings)
         text = file_data["text"][:8000]  # Truncate to reasonable length
+
+        # Filter out files with < 50 characters of actual content
+        # (headers, empty CSVs, metadata-only entries)
+        if len(text.strip()) < 50:
+            print(f"      ⏭️  Skipped (insufficient content: {len(text.strip())} chars)")
+            skipped_count += 1
+            continue
+
+        # Generate embedding
         embedding = embedding_provider.get_embedding_sync(text)
 
         if embedding is None:
@@ -930,31 +939,8 @@ def list_folder_contents_only(token, folder_id, folder_path, extracted_files, pr
         file_list.append(f"  • {file_name} ({file_size} bytes)")
         processed_count[0] += 1
 
-    # Recursively list subfolders
-    for folder_item in folders:
-        folder_name = folder_item['name']
-        subfolder_path = f"{folder_path}/{folder_name}"
-        subfolder_id = folder_item['id']
-
-        # Get subfolder contents
-        subfolder_url = f"{base_url}/items/{subfolder_id}/children"
-        subfolder_response = requests.get(subfolder_url, headers=headers)
-        if subfolder_response.status_code == 200:
-            subfolder_items = subfolder_response.json().get("value", [])
-            subfolder_files = [item for item in subfolder_items if "file" in item]
-            for item in subfolder_files:
-                file_name = item['name']
-                file_size = item.get("size", 0)
-                file_list.append(f"  • {subfolder_path}/{file_name} ({file_size} bytes)")
-                processed_count[0] += 1
-
-            # Recurse deeper
-            subfolder_folders = [item for item in subfolder_items if "folder" in item]
-            for sub_folder_item in subfolder_folders:
-                list_folder_contents_only(
-                    token, sub_folder_item['id'], f"{subfolder_path}/{sub_folder_item['name']}",
-                    extracted_files, processed_count
-                )
+    # Note: Subfolders are handled by crawl_folder_recursive(), not here
+    # This function only lists files in the CURRENT folder
 
     # Create a single entry with the folder listing
     if file_list:
@@ -1019,6 +1005,16 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
     # Process folders first (for interactive selection)
     folders = [item for item in items if "folder" in item]
     files = [item for item in items if "file" in item]
+
+    # Check if CURRENT folder is list-only (skip file extraction if so)
+    current_folder_mode = skip_cache.get(folder_path, "process")
+    if current_folder_mode == "list-only":
+        # List files only, don't extract content
+        print(f"   📋 Listing files in {folder_path} (list-only mode)")
+        list_folder_contents_only(
+            token_ref[0], folder_id, folder_path, extracted_files, processed_count
+        )
+        return processed_count[0]
 
     # Process subfolders
     for folder_item in folders:
