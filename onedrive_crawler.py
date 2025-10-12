@@ -1033,12 +1033,20 @@ def discover_files_in_folder(token, folder_id, folder_path, file_paths):
     base_url = "https://graph.microsoft.com/v1.0/me/drive"
 
     url = f"{base_url}/items/{folder_id}/children"
-    response = requests.get(url, headers=headers)
+    items = []
 
-    if response.status_code != 200:
-        return
+    # Handle pagination - OneDrive returns max 200 items per page
+    while url:
+        response = requests.get(url, headers=headers)
 
-    items = response.json().get("value", [])
+        if response.status_code != 200:
+            return
+
+        page_data = response.json()
+        items.extend(page_data.get("value", []))
+
+        # Check for next page
+        url = page_data.get("@odata.nextLink", None)
 
     # Add all files
     for item in items:
@@ -1124,15 +1132,23 @@ def list_folder_contents_only(token, folder_id, folder_path, extracted_files, pr
     headers = {"Authorization": f"Bearer {token}"}
     base_url = "https://graph.microsoft.com/v1.0/me/drive"
 
-    # List items in current folder
+    # List items in current folder with pagination support
     url = f"{base_url}/items/{folder_id}/children"
-    response = requests.get(url, headers=headers)
+    items = []
 
-    if response.status_code != 200:
-        print(f"   ⚠️ Failed to access folder: {response.text}")
-        return
+    # Handle pagination - OneDrive returns max 200 items per page
+    while url:
+        response = requests.get(url, headers=headers)
 
-    items = response.json().get("value", [])
+        if response.status_code != 200:
+            print(f"   ⚠️ Failed to access folder: {response.text}")
+            return
+
+        page_data = response.json()
+        items.extend(page_data.get("value", []))
+
+        # Check for next page
+        url = page_data.get("@odata.nextLink", None)
     folders = [item for item in items if "folder" in item]
     files = [item for item in items if "file" in item]
 
@@ -1188,28 +1204,41 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
     headers = {"Authorization": f"Bearer {token_ref[0]}"}
     base_url = "https://graph.microsoft.com/v1.0/me/drive"
 
-    # List items in current folder
+    # List items in current folder with pagination support
     url = f"{base_url}/items/{folder_id}/children"
-    response = requests.get(url, headers=headers)
+    items = []
+    page_num = 1
 
-    # If token expired, try to refresh it
-    if is_token_expired(response):
-        print(f"   🔄 Token expired, refreshing...")
-        new_token = get_access_token(silent_only=True)
-        if new_token:
-            token_ref[0] = new_token  # Update token reference
-            headers = {"Authorization": f"Bearer {token_ref[0]}"}
-            response = requests.get(url, headers=headers)  # Retry request
-            print(f"   ✅ Token refreshed successfully")
-        else:
-            print(f"   ❌ Token refresh failed")
+    # Handle pagination - OneDrive returns max 200 items per page
+    while url:
+        response = requests.get(url, headers=headers)
+
+        # If token expired, try to refresh it
+        if is_token_expired(response):
+            print(f"   🔄 Token expired, refreshing...")
+            new_token = get_access_token(silent_only=True)
+            if new_token:
+                token_ref[0] = new_token  # Update token reference
+                headers = {"Authorization": f"Bearer {token_ref[0]}"}
+                response = requests.get(url, headers=headers)  # Retry request
+                print(f"   ✅ Token refreshed successfully")
+            else:
+                print(f"   ❌ Token refresh failed")
+                return processed_count[0]
+
+        if response.status_code != 200:
+            print(f"   ⚠️ Failed to access folder: {response.text}")
             return processed_count[0]
 
-    if response.status_code != 200:
-        print(f"   ⚠️ Failed to access folder: {response.text}")
-        return processed_count[0]
+        page_data = response.json()
+        page_items = page_data.get("value", [])
+        items.extend(page_items)
 
-    items = response.json().get("value", [])
+        # Check for next page
+        url = page_data.get("@odata.nextLink", None)
+        if url:
+            page_num += 1
+            print(f"   📄 Fetching page {page_num} ({len(items)} items so far)...")
 
     # Process folders first (for interactive selection)
     folders = [item for item in items if "folder" in item]
@@ -1371,34 +1400,41 @@ def discover_all_folders(token, folder_id, folder_path="/Documents", folders_lis
     headers = {"Authorization": f"Bearer {token}"}
     base_url = "https://graph.microsoft.com/v1.0/me/drive"
 
-    # List items in current folder
+    # List items in current folder with pagination support
     url = f"{base_url}/items/{folder_id}/children"
+    items = []
 
-    try:
-        response = requests.get(url, headers=headers, timeout=10)  # 10 second timeout
-    except requests.exceptions.Timeout:
-        print(f"   ⏱️ Timeout on {folder_path} (>10s), retrying with 30s timeout...")
+    # Handle pagination - OneDrive returns max 200 items per page
+    while url:
         try:
-            response = requests.get(url, headers=headers, timeout=30)  # Retry with longer timeout
-        except Exception as retry_error:
-            error_msg = f"Timeout after 30s"
-            print(f"   ❌ Still timeout. Marking for later retry.")
+            response = requests.get(url, headers=headers, timeout=10)  # 10 second timeout
+        except requests.exceptions.Timeout:
+            print(f"   ⏱️ Timeout on {folder_path} (>10s), retrying with 30s timeout...")
+            try:
+                response = requests.get(url, headers=headers, timeout=30)  # Retry with longer timeout
+            except Exception as retry_error:
+                error_msg = f"Timeout after 30s"
+                print(f"   ❌ Still timeout. Marking for later retry.")
+                failed_folders.append((folder_path, folder_id, error_msg))
+                return folders_list, failed_folders
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error: {str(e)[:60]}"
+            print(f"   ⚠️ {error_msg}")
+            print(f"   ⚠️ Marking for later retry.")
             failed_folders.append((folder_path, folder_id, error_msg))
             return folders_list, failed_folders
-    except requests.exceptions.RequestException as e:
-        error_msg = f"Network error: {str(e)[:60]}"
-        print(f"   ⚠️ {error_msg}")
-        print(f"   ⚠️ Marking for later retry.")
-        failed_folders.append((folder_path, folder_id, error_msg))
-        return folders_list, failed_folders
 
-    if response.status_code != 200:
-        error_msg = f"API error {response.status_code}"
-        print(f"   ⚠️ {error_msg} on {folder_path}. Marking for retry.")
-        failed_folders.append((folder_path, folder_id, error_msg))
-        return folders_list, failed_folders
+        if response.status_code != 200:
+            error_msg = f"API error {response.status_code}"
+            print(f"   ⚠️ {error_msg} on {folder_path}. Marking for retry.")
+            failed_folders.append((folder_path, folder_id, error_msg))
+            return folders_list, failed_folders
 
-    items = response.json().get("value", [])
+        page_data = response.json()
+        items.extend(page_data.get("value", []))
+
+        # Check for next page
+        url = page_data.get("@odata.nextLink", None)
 
     # Find all subfolders
     subfolder_items = [item for item in items if "folder" in item]

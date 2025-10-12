@@ -1,11 +1,24 @@
 import os
+import sys
 import json
+import logging
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from pinecone import Pinecone
 from embeddings import EmbeddingProvider
 from config import settings
 from document_storage import DocumentStorage
+
+# Configure logging to stderr ONLY (stdout is reserved for MCP protocol)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stderr  # CRITICAL: MCP uses stdout for JSON-RPC, logs must go to stderr
+)
+
+# Silence noisy Azure SDK logging
+logging.getLogger('azure').setLevel(logging.WARNING)
+logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.WARNING)
 
 # Don't load .env - use environment vars from Claude config
 # load_dotenv()  # REMOVE THIS LINE
