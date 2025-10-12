@@ -150,10 +150,10 @@ class EmbeddingProvider:
             "X-Pinecone-API-Version": "2025-04"
         }
 
-        # Add dimension parameter for llama-text-embed-v2 to match index
+        # Add dimension parameter for llama-text-embed-v2 for high-quality embeddings
         params = {"input_type": "passage"}
         if settings.EMBEDDING_MODEL == "llama-text-embed-v2":
-            params["dimension"] = 384  # Match existing index dimension
+            params["dimension"] = 1024  # High-quality 1024-dim embeddings for better search
 
         data = {
             "model": settings.EMBEDDING_MODEL,
