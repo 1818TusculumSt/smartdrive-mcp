@@ -1,8 +1,9 @@
 import numpy as np
 import logging
-from typing import Optional
+from typing import Optional, Dict, List
 import aiohttp
 from sentence_transformers import SentenceTransformer
+from pinecone_text.sparse import BM25Encoder
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ class EmbeddingProvider:
         self.provider_type = settings.EMBEDDING_PROVIDER
         self._local_model = None
         self._session = None
+        self._bm25_encoder = None  # Lazy-load BM25 encoder
 
         if self.provider_type == "local":
             self._init_local_model()
@@ -348,6 +350,47 @@ class EmbeddingProvider:
         except Exception as e:
             logger.error(f"Unexpected error in Voyage AI embedding: {e}", exc_info=True)
             return None
+
+    def get_sparse_embedding_sync(self, text: str) -> Optional[Dict[str, List]]:
+        """
+        Generate BM25 sparse embedding for hybrid search (synchronous).
+
+        Args:
+            text: Text to encode
+
+        Returns:
+            Dict with 'indices' and 'values' for sparse vector, or None on error
+        """
+        if not text or not text.strip():
+            logger.warning("Empty text provided for sparse embedding")
+            return None
+
+        try:
+            # Lazy-load BM25 encoder
+            if self._bm25_encoder is None:
+                logger.info("Initializing BM25 encoder for sparse embeddings...")
+                self._bm25_encoder = BM25Encoder.default()
+                logger.info("BM25 encoder initialized")
+
+            # Generate sparse embedding
+            sparse_vector = self._bm25_encoder.encode_documents([text])[0]
+
+            # Convert to Pinecone format
+            result = {
+                "indices": sparse_vector["indices"].tolist() if hasattr(sparse_vector["indices"], 'tolist') else sparse_vector["indices"],
+                "values": sparse_vector["values"].tolist() if hasattr(sparse_vector["values"], 'tolist') else sparse_vector["values"]
+            }
+
+            logger.debug(f"Generated sparse embedding ({len(result['indices'])} terms)")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error generating sparse embedding: {e}", exc_info=True)
+            return None
+
+    async def get_sparse_embedding(self, text: str) -> Optional[Dict[str, List]]:
+        """Async wrapper for sparse embedding generation"""
+        return self.get_sparse_embedding_sync(text)
 
     async def close(self):
         """Close any open sessions"""

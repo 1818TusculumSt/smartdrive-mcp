@@ -23,6 +23,7 @@ from pinecone import Pinecone
 from embeddings import EmbeddingProvider
 from config import settings
 from document_intelligence import should_use_document_intelligence, extract_with_document_intelligence
+from document_storage import DocumentStorage
 
 load_dotenv()
 
@@ -57,6 +58,11 @@ else:
 print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({model_display})...")
 embedding_provider = EmbeddingProvider()
 print("✅ Embedding provider loaded\n")
+
+# Initialize document storage
+print("☁️  Initializing Azure Blob Storage...")
+document_storage = DocumentStorage()
+print("✅ Document storage ready\n")
 
 # Initialize EasyOCR reader (lazy-loaded on first use)
 ocr_reader = None
@@ -680,14 +686,45 @@ def generate_vector_id(file_path):
     # Use MD5 hash of file path for consistent, URL-safe IDs
     return hashlib.md5(file_path.encode('utf-8')).hexdigest()
 
+def chunk_text(text, chunk_size=30000, overlap=500):
+    """Split text into overlapping chunks
+
+    Args:
+        text: Full document text
+        chunk_size: Target characters per chunk (~15K tokens for embedding limits)
+        overlap: Characters to overlap between chunks
+
+    Returns:
+        List of text chunks
+    """
+    if len(text) <= chunk_size:
+        return [text]
+
+    chunks = []
+    start = 0
+
+    while start < len(text):
+        end = start + chunk_size
+        chunk = text[start:end]
+        chunks.append(chunk)
+
+        # Move start forward by (chunk_size - overlap) for next chunk
+        start = end - overlap
+
+    return chunks
+
 def upload_to_pinecone(files_data, check_existing=True):
-    """Upload extracted files to Pinecone with embeddings (incremental sync enabled)
+    """Upload extracted files to Pinecone with RAG architecture
+
+    Full document text is stored in Azure Blob Storage.
+    Pinecone stores only vectors + minimal metadata with doc_id reference.
+    Large documents are chunked into 30KB pieces, all referencing same doc_id.
 
     Args:
         files_data: List of file data dictionaries
         check_existing: If True, check Pinecone for existing files and skip unchanged ones
     """
-    print(f"\n📤 Processing {len(files_data)} files for Pinecone upload...")
+    print(f"\n📤 Processing {len(files_data)} files for RAG upload...")
 
     # If incremental sync enabled, check which files already exist
     existing_files = {}
@@ -695,7 +732,7 @@ def upload_to_pinecone(files_data, check_existing=True):
         print(f"   🔍 Checking Pinecone for existing files...")
         try:
             # Query Pinecone for all existing file paths in batches
-            vector_ids = [generate_vector_id(file_data["path"]) for file_data in files_data]
+            vector_ids = [generate_vector_id(file_data["path"] + "_chunk0") for file_data in files_data]
 
             # Fetch in batches of 100 (Pinecone limit)
             for i in range(0, len(vector_ids), 100):
@@ -754,44 +791,89 @@ def upload_to_pinecone(files_data, check_existing=True):
             skipped_count += 1
             continue
 
-        # Truncate for embedding based on provider limits
-        # Voyage AI: 32K tokens = ~128K chars (entire 50+ page PDFs!)
-        # Pinecone llama: 2048 tokens = ~8K chars
-        # Default to 128K for maximum document coverage with Voyage
-        text_for_embedding = full_text[:128000]
-
-        # Generate embedding
-        embedding = embedding_provider.get_embedding_sync(text_for_embedding)
-
-        if embedding is None:
-            print(f"      ⚠️ Failed to generate embedding")
+        # RAG Architecture: Store full text in Azure Blob, get doc_id
+        try:
+            doc_id = document_storage.store_document(file_path, full_text)
+            print(f"      ☁️  Stored full text in Azure Blob ({len(full_text)} chars) → {doc_id}")
+        except Exception as e:
+            print(f"      ❌ Failed to store in Azure Blob: {e}")
             continue
 
-        embedding = embedding.tolist()
+        # Create small preview for metadata (200 chars)
+        text_preview = full_text[:200].strip()
+        if len(full_text) > 200:
+            text_preview += "..."
 
-        # Generate deterministic vector ID from file path
-        vector_id = generate_vector_id(file_path)
+        # Chunk document into 30KB pieces for embedding
+        chunks = chunk_text(full_text, chunk_size=30000, overlap=500)
+        print(f"      📑 Split into {len(chunks)} chunk(s)")
 
-        vectors.append({
-            "id": vector_id,
-            "values": embedding,
-            "metadata": {
-                "file_name": file_data["name"],
-                "file_path": file_path,
-                "size": file_size,
-                "modified": file_modified,
-                "text_preview": full_text  # Store FULL text (Pinecone supports up to 40KB)
+        # Generate embeddings for each chunk
+        for chunk_idx, chunk_text in enumerate(chunks):
+            # Truncate chunk for embedding based on provider limits
+            # Voyage AI: 32K tokens = ~128K chars
+            # For 30KB chunks, this should always fit
+            text_for_embedding = chunk_text[:128000]
+
+            # Generate embedding
+            embedding = embedding_provider.get_embedding_sync(text_for_embedding)
+
+            if embedding is None:
+                print(f"         ⚠️ Failed to generate embedding for chunk {chunk_idx+1}")
+                continue
+
+            embedding = embedding.tolist()
+
+            # Generate sparse embedding for hybrid search
+            sparse_embedding = embedding_provider.get_sparse_embedding_sync(chunk_text)
+
+            # Generate deterministic vector ID from file path + chunk index
+            vector_id = generate_vector_id(file_path + f"_chunk{chunk_idx}")
+
+            vector_data = {
+                "id": vector_id,
+                "values": embedding,
+                "metadata": {
+                    "file_name": file_data["name"],
+                    "file_path": file_path,
+                    "size": file_size,
+                    "modified": file_modified,
+                    "doc_id": doc_id,  # Reference to Azure Blob document
+                    "text_preview": text_preview,  # Small preview (200 chars)
+                    "is_chunked": len(chunks) > 1,
+                    "chunk_index": chunk_idx,
+                    "total_chunks": len(chunks)
+                }
             }
-        })
 
-    # Upsert to Pinecone (upsert will update existing or insert new)
+            # Add sparse vector if generated successfully
+            if sparse_embedding:
+                vector_data["sparse_values"] = sparse_embedding
+
+            vectors.append(vector_data)
+
+        print(f"         ✅ Generated {len(chunks)} embedding(s)")
+
+    # Upsert to Pinecone in batches of 100 (to avoid 4MB limit)
     if vectors:
-        index.upsert(vectors=vectors, namespace="smartdrive")
+        print(f"\n📤 Uploading {len(vectors)} vector(s) to Pinecone...")
+        uploaded_count = 0
+
+        for i in range(0, len(vectors), 100):
+            batch = vectors[i:i+100]
+            try:
+                index.upsert(vectors=batch, namespace="smartdrive")
+                uploaded_count += len(batch)
+                print(f"   ✅ Uploaded batch {i//100 + 1}: {uploaded_count}/{len(vectors)} vectors")
+            except Exception as e:
+                print(f"   ❌ Batch upload failed: {e}")
+
         print(f"\n✅ Pinecone upload complete:")
         print(f"   ➕ New files: {new_count}")
         print(f"   🔄 Updated files: {updated_count}")
         print(f"   ⏭️  Skipped (unchanged): {skipped_count}")
         print(f"   📊 Total processed: {len(files_data)} files")
+        print(f"   📊 Total vectors uploaded: {uploaded_count}")
     else:
         print(f"\n✅ No files needed uploading (all {skipped_count} unchanged)")
 

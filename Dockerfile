@@ -24,6 +24,7 @@ COPY embeddings.py .
 COPY config.py .
 COPY smartdrive_server.py .
 COPY document_intelligence.py .
+COPY document_storage.py .
 
 # Create directories for cache files
 RUN mkdir -p /root/.cache

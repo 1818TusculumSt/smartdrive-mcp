@@ -6,6 +6,7 @@ python-docx
 python-pptx
 openpyxl
 pinecone[grpc]
+pinecone-text
 sentence-transformers
 mcp
 pydantic-settings
@@ -14,5 +15,6 @@ Pillow
 easyocr
 azure-ai-vision-imageanalysis
 azure-ai-formrecognizer
+azure-storage-blob
 olefile
 markdown
