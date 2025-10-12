@@ -56,7 +56,7 @@ else:
     model_display = settings.EMBEDDING_MODEL
 
 print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({model_display})...")
-embedding_provider = EmbeddingProvider()
+embedding_provider = EmbeddingProvider(init_bm25=True)
 print("✅ Embedding provider loaded\n")
 
 # Initialize document storage
@@ -732,7 +732,7 @@ def upload_to_pinecone(files_data, check_existing=True):
         print(f"   🔍 Checking Pinecone for existing files...")
         try:
             # Query Pinecone for all existing file paths in batches
-            vector_ids = [generate_vector_id(file_data["path"] + "_chunk0") for file_data in files_data]
+            vector_ids = [generate_vector_id(file_data["path"]) for file_data in files_data]
 
             # Fetch in batches of 100 (Pinecone limit)
             for i in range(0, len(vector_ids), 100):
@@ -761,6 +761,8 @@ def upload_to_pinecone(files_data, check_existing=True):
     skipped_count = 0
     updated_count = 0
     new_count = 0
+    azure_stored_count = 0
+    azure_failed_count = 0
 
     for file_data in files_data:
         file_path = file_data["path"]
@@ -793,70 +795,117 @@ def upload_to_pinecone(files_data, check_existing=True):
 
         # RAG Architecture: Store full text in Azure Blob, get doc_id
         try:
-            doc_id = document_storage.store_document(file_path, full_text)
-            print(f"      ☁️  Stored full text in Azure Blob ({len(full_text)} chars) → {doc_id}")
+            # Generate doc_id first to check if it already exists
+            doc_id = document_storage.generate_doc_id(file_path)
+
+            if document_storage.document_exists(doc_id):
+                print(f"      ☁️  Already in Azure Blob ({len(full_text)} chars) → {doc_id}")
+            else:
+                document_storage.store_document(file_path, full_text)
+                azure_stored_count += 1
+                print(f"      ☁️  Stored full text in Azure Blob ({len(full_text)} chars) → {doc_id}")
         except Exception as e:
+            azure_failed_count += 1
             print(f"      ❌ Failed to store in Azure Blob: {e}")
             continue
 
-        # Create small preview for metadata (200 chars)
+        # Create preview for metadata (200 chars)
         text_preview = full_text[:200].strip()
         if len(full_text) > 200:
             text_preview += "..."
 
-        # Chunk document into 30KB pieces for embedding
-        chunks = chunk_text(full_text, chunk_size=30000, overlap=500)
-        print(f"      📑 Split into {len(chunks)} chunk(s)")
+        # RAG Architecture: Create ONE embedding per file
+        # Voyage AI voyage-3-large supports 32K tokens (~128K chars)
+        # Strategy: Include as much context as possible for best search quality
 
-        # Generate embeddings for each chunk
-        for chunk_idx, chunk_text in enumerate(chunks):
-            # Truncate chunk for embedding based on provider limits
-            # Voyage AI: 32K tokens = ~128K chars
-            # For 30KB chunks, this should always fit
-            text_for_embedding = chunk_text[:128000]
+        # Determine optimal text for embedding based on document length
+        doc_length = len(full_text)
 
-            # Generate embedding
-            embedding = embedding_provider.get_embedding_sync(text_for_embedding)
+        if doc_length <= 100000:
+            # Document fits entirely in Voyage's context (up to 100K chars = ~25K tokens)
+            # Use FULL document for maximum search accuracy
+            text_for_embedding = full_text
+        else:
+            # Large document: Use intelligent sampling
+            # Take substantial beginning (80K) + meaningful end (20K) for 100K total
+            # This captures: intro, TOC, main content + conclusion, references
+            beginning = full_text[:80000]
+            ending = full_text[-20000:]
+            text_for_embedding = beginning + "\n\n[... document continues ...]\n\n" + ending
 
-            if embedding is None:
-                print(f"         ⚠️ Failed to generate embedding for chunk {chunk_idx+1}")
-                continue
+        # Enhance with structured metadata for better semantic understanding
+        file_type = file_data["name"].split('.')[-1].upper() if '.' in file_data["name"] else "FILE"
+        enhanced_text = f"Document: {file_data['name']}\nType: {file_type}\nPath: {file_path}\n\n{text_for_embedding}"
 
-            embedding = embedding.tolist()
+        # Generate embedding with full context
+        embedding = embedding_provider.get_embedding_sync(enhanced_text)
 
-            # Generate sparse embedding for hybrid search
-            sparse_embedding = embedding_provider.get_sparse_embedding_sync(chunk_text)
+        if embedding is None:
+            print(f"         ⚠️ Failed to generate embedding")
+            continue
 
-            # Generate deterministic vector ID from file path + chunk index
-            vector_id = generate_vector_id(file_path + f"_chunk{chunk_idx}")
+        embedding = embedding.tolist()
 
-            vector_data = {
-                "id": vector_id,
-                "values": embedding,
-                "metadata": {
-                    "file_name": file_data["name"],
-                    "file_path": file_path,
-                    "size": file_size,
-                    "modified": file_modified,
-                    "doc_id": doc_id,  # Reference to Azure Blob document
-                    "text_preview": text_preview,  # Small preview (200 chars)
-                    "is_chunked": len(chunks) > 1,
-                    "chunk_index": chunk_idx,
-                    "total_chunks": len(chunks)
-                }
+        # Generate sparse embedding for hybrid search (using same enhanced text)
+        # BM25 can exceed Pinecone's 2048 non-zero limit, so truncate if needed
+        sparse_embedding = embedding_provider.get_sparse_embedding_sync(enhanced_text)
+        if sparse_embedding and len(sparse_embedding.get('indices', [])) > 2048:
+            # Truncate to top 2048 values (keep highest importance terms)
+            indices = sparse_embedding['indices'][:2048]
+            values = sparse_embedding['values'][:2048]
+            sparse_embedding = {'indices': indices, 'values': values}
+            print(f"         ⚠️  Sparse vector truncated from {len(sparse_embedding.get('indices', []))} to 2048 terms")
+
+        # Generate deterministic vector ID from file path
+        vector_id = generate_vector_id(file_path)
+
+        # Determine content characteristics for metadata
+        file_extension = file_data["name"].split('.')[-1].lower() if '.' in file_data["name"] else ""
+
+        # Categorize document type for filtering
+        doc_category = "other"
+        if file_extension in ['pdf', 'doc', 'docx']:
+            doc_category = "document"
+        elif file_extension in ['xlsx', 'xlsm', 'csv', 'xls']:
+            doc_category = "spreadsheet"
+        elif file_extension in ['pptx', 'ppt']:
+            doc_category = "presentation"
+        elif file_extension in ['txt', 'md', 'json']:
+            doc_category = "text"
+        elif file_extension in ['png', 'jpg', 'jpeg', 'tiff', 'gif', 'bmp']:
+            doc_category = "image"
+
+        vector_data = {
+            "id": vector_id,
+            "values": embedding,
+            "metadata": {
+                "file_name": file_data["name"],
+                "file_path": file_path,
+                "file_extension": file_extension,
+                "doc_category": doc_category,
+                "size": file_size,
+                "size_mb": round(file_size / (1024 * 1024), 2),  # Easier to read
+                "char_count": doc_length,
+                "modified": file_modified,
+                "doc_id": doc_id,  # Reference to Azure Blob document for full text retrieval
+                "text_preview": text_preview,  # Small preview (200 chars)
+                "embedding_coverage": "full" if doc_length <= 100000 else "sampled",  # Transparency about what was embedded
             }
+        }
 
-            # Add sparse vector if generated successfully
-            if sparse_embedding:
-                vector_data["sparse_values"] = sparse_embedding
+        # Add sparse vector if generated successfully
+        if sparse_embedding:
+            vector_data["sparse_values"] = sparse_embedding
 
-            vectors.append(vector_data)
+        vectors.append(vector_data)
 
-        print(f"         ✅ Generated {len(chunks)} embedding(s)")
+        # Show embedding quality info
+        coverage_info = f"full doc" if doc_length <= 100000 else f"100K/{ doc_length:,} chars"
+        print(f"         ✅ Generated 1 embedding ({coverage_info}, 2048-dim hybrid)")
 
     # Upsert to Pinecone in batches of 100 (to avoid 4MB limit)
     if vectors:
-        print(f"\n📤 Uploading {len(vectors)} vector(s) to Pinecone...")
+        print(f"\n📤 Uploading to Pinecone...")
         uploaded_count = 0
 
         for i in range(0, len(vectors), 100):
@@ -864,16 +913,20 @@ def upload_to_pinecone(files_data, check_existing=True):
             try:
                 index.upsert(vectors=batch, namespace="smartdrive")
                 uploaded_count += len(batch)
-                print(f"   ✅ Uploaded batch {i//100 + 1}: {uploaded_count}/{len(vectors)} vectors")
+                print(f"   ✅ Uploaded batch {i//100 + 1}: {uploaded_count}/{len(vectors)} files")
             except Exception as e:
                 print(f"   ❌ Batch upload failed: {e}")
 
-        print(f"\n✅ Pinecone upload complete:")
-        print(f"   ➕ New files: {new_count}")
-        print(f"   🔄 Updated files: {updated_count}")
-        print(f"   ⏭️  Skipped (unchanged): {skipped_count}")
-        print(f"   📊 Total processed: {len(files_data)} files")
-        print(f"   📊 Total vectors uploaded: {uploaded_count}")
+        print(f"\n✅ Upload Complete:")
+        print(f"\n   📊 Pinecone Vectors:")
+        print(f"      ➕ New: {new_count}")
+        print(f"      🔄 Updated: {updated_count}")
+        print(f"      ⏭️  Skipped: {skipped_count}")
+        print(f"      ✅ Uploaded: {uploaded_count}")
+        print(f"\n   ☁️  Azure Blob Storage:")
+        print(f"      ✅ Stored: {azure_stored_count}")
+        if azure_failed_count > 0:
+            print(f"      ❌ Failed: {azure_failed_count}")
     else:
         print(f"\n✅ No files needed uploading (all {skipped_count} unchanged)")
 
@@ -948,18 +1001,26 @@ def delete_folder_from_index(folder_path):
         # Generate vector IDs for these files
         vector_ids = [generate_vector_id(fp) for fp in file_paths]
 
-        # Delete in batches of 100
+        # Delete vectors from Pinecone in batches of 100
         deleted_count = 0
         for i in range(0, len(vector_ids), 100):
             batch_ids = vector_ids[i:i+100]
             try:
                 index.delete(ids=batch_ids, namespace="smartdrive")
                 deleted_count += len(batch_ids)
-                print(f"   🗑️  Deleted batch: {deleted_count}/{len(vector_ids)} vectors")
+                print(f"   🗑️  Deleted batch: {deleted_count}/{len(vector_ids)} vectors from Pinecone")
             except Exception as e:
                 print(f"   ⚠️  Batch delete failed: {e}")
 
-        print(f"\n✅ Deleted {deleted_count} files from index")
+        # Also delete documents from Azure Blob Storage
+        print(f"\n🗑️  Cleaning up documents from Azure Blob Storage...")
+        doc_ids = [document_storage.generate_doc_id(fp) for fp in file_paths]
+        azure_deleted = document_storage.delete_documents_by_doc_ids(doc_ids)
+        print(f"   ✅ Deleted {azure_deleted} document(s) from Azure Blob")
+
+        print(f"\n✅ Cleanup complete:")
+        print(f"   🗑️  Pinecone: {deleted_count} vectors deleted")
+        print(f"   ☁️  Azure Blob: {azure_deleted} documents deleted")
         return deleted_count
 
     except Exception as e:
@@ -1544,18 +1605,42 @@ def cleanup_stale_vectors(seen_file_paths):
             print(f"   ❌ Cleanup cancelled")
             return 0
 
-        # Delete in batches of 100
+        # Fetch metadata from Pinecone to get doc_ids BEFORE deleting
+        print(f"   📊 Fetching metadata from Pinecone to find doc_ids...")
+        doc_ids_to_delete = []
+        for i in range(0, len(stale_vector_ids), 100):
+            batch_ids = stale_vector_ids[i:i+100]
+            try:
+                result = index.fetch(ids=batch_ids, namespace="smartdrive")
+                for vid, vector in result.get('vectors', {}).items():
+                    doc_id = vector.get('metadata', {}).get('doc_id')
+                    if doc_id:
+                        doc_ids_to_delete.append(doc_id)
+            except Exception as e:
+                print(f"   ⚠️  Metadata fetch failed for batch: {e}")
+
+        print(f"   ✅ Found {len(doc_ids_to_delete)} doc_id(s) to delete from Azure")
+
+        # Delete vectors from Pinecone in batches of 100
         deleted_count = 0
         for i in range(0, len(stale_vector_ids), 100):
             batch_ids = stale_vector_ids[i:i+100]
             try:
                 index.delete(ids=batch_ids, namespace="smartdrive")
                 deleted_count += len(batch_ids)
-                print(f"   🗑️  Deleted batch: {deleted_count}/{len(stale_vector_ids)} vectors")
+                print(f"   🗑️  Deleted batch: {deleted_count}/{len(stale_vector_ids)} vectors from Pinecone")
             except Exception as e:
                 print(f"   ⚠️ Batch delete failed: {e}")
 
-        print(f"\n✅ Cleanup complete! Deleted {deleted_count} stale vector(s)")
+        # Delete stale documents from Azure Blob Storage
+        if doc_ids_to_delete:
+            print(f"\n🗑️  Cleaning up {len(doc_ids_to_delete)} document(s) from Azure Blob Storage...")
+            azure_deleted = document_storage.delete_documents_by_doc_ids(doc_ids_to_delete)
+            print(f"   ✅ Deleted {azure_deleted} document(s) from Azure Blob")
+
+        print(f"\n✅ Cleanup complete:")
+        print(f"   🗑️  Pinecone: {deleted_count} vectors deleted")
+        print(f"   ☁️  Azure Blob: {len(doc_ids_to_delete)} documents deleted")
         return deleted_count
 
     except Exception as e:

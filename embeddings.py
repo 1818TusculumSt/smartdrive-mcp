@@ -19,11 +19,11 @@ class EmbeddingProvider:
     - Voyage: Voyage AI embeddings (32K token context, 2048 dims)
     """
 
-    def __init__(self):
+    def __init__(self, init_bm25=False):
         self.provider_type = settings.EMBEDDING_PROVIDER
         self._local_model = None
         self._session = None
-        self._bm25_encoder = None  # Lazy-load BM25 encoder
+        self._bm25_encoder = None
 
         if self.provider_type == "local":
             self._init_local_model()
@@ -35,6 +35,40 @@ class EmbeddingProvider:
             self._validate_voyage_config()
         else:
             raise ValueError(f"Invalid EMBEDDING_PROVIDER: {self.provider_type}. Must be 'local', 'api', 'pinecone', or 'voyage'")
+
+        # Optionally initialize BM25 encoder at startup to preload NLTK data
+        if init_bm25:
+            self._init_bm25_encoder()
+
+    def _init_bm25_encoder(self):
+        """Initialize BM25 encoder and preload NLTK data"""
+        try:
+            import sys
+            import os
+            from io import StringIO
+
+            logger.info("Preloading NLTK data and initializing BM25 encoder...")
+
+            # Suppress NLTK download messages by redirecting stdout
+            old_stdout = sys.stdout
+            sys.stdout = StringIO()
+
+            try:
+                import nltk
+                # Download required NLTK data silently
+                nltk.download('punkt_tab', quiet=True)
+                nltk.download('stopwords', quiet=True)
+                # Initialize encoder (this also triggers NLTK internally)
+                self._bm25_encoder = BM25Encoder.default()
+            finally:
+                # Restore stdout
+                sys.stdout = old_stdout
+
+            logger.info("BM25 encoder initialized successfully")
+        except Exception as e:
+            logger.warning(f"Could not preload BM25 encoder: {e}")
+            # Not critical, will lazy-load later if needed
+            self._bm25_encoder = None
 
     def _init_local_model(self):
         """Initialize local sentence-transformer model"""

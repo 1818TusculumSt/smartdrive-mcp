@@ -147,3 +147,22 @@ class DocumentStorage:
         except Exception as e:
             logger.error(f"Failed to check if document {doc_id} exists: {e}")
             return False
+
+    def delete_documents_by_doc_ids(self, doc_ids: list) -> int:
+        """
+        Delete multiple documents from Azure Blob Storage by doc_id.
+
+        Args:
+            doc_ids: List of document IDs to delete
+
+        Returns:
+            Number of documents successfully deleted
+        """
+        deleted_count = 0
+
+        for doc_id in doc_ids:
+            if self.delete_document(doc_id):
+                deleted_count += 1
+
+        logger.info(f"Deleted {deleted_count}/{len(doc_ids)} documents from Azure Blob")
+        return deleted_count
