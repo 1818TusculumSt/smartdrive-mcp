@@ -333,7 +333,18 @@ AZURE_VISION_ENDPOINT=https://your-region.api.cognitive.microsoft.com/
 3. Choose "Free F0" tier (5,000 pages/month) or "Standard S1"
 4. Copy your API key and endpoint to `.env`
 
-SmartDrive will automatically use Azure OCR if credentials are provided, otherwise falls back to local EasyOCR.
+#### OCR Strict Mode (Optional)
+Force Azure OCR only (no EasyOCR fallback):
+```env
+OCR_STRICT_MODE=true
+```
+
+When enabled:
+- ✅ Only uses Azure OCR (10-20x faster)
+- ❌ Files fail if Azure OCR fails (no slow EasyOCR fallback)
+- 💡 Use this for speed when you have Azure credits
+
+SmartDrive will automatically use Azure OCR if credentials are provided, otherwise falls back to local EasyOCR (unless strict mode is enabled).
 
 ### Indexing Customization
 
