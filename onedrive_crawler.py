@@ -430,28 +430,30 @@ def extract_text_from_file(token, file_item):
                 print(f"   ⚠️ PowerPoint parsing failed: {pptx_error}")
                 return None
 
-        # Legacy PowerPoint (.ppt) - use Apache Tika
+        # Legacy PowerPoint (.ppt) - try with existing tools, fallback gracefully
         elif file_name.endswith('.ppt'):
-            print(f"   📋 Legacy .ppt format - using Apache Tika for extraction...")
+            print(f"   📋 Legacy .ppt format - attempting extraction...")
             try:
-                from tika import parser
-                # Parse .ppt file with Tika
-                parsed = parser.from_buffer(content)
-                text = parsed.get("content", "")
-                if text and len(text.strip()) > 20:
-                    print(f"   ✅ Extracted {len(text)} characters via Tika")
-                    return text.strip()
+                # Try python-pptx (sometimes works with .ppt files converted internally)
+                prs = Presentation(io.BytesIO(content))
+                text_parts = []
+                for slide_num, slide in enumerate(prs.slides, 1):
+                    text_parts.append(f"=== Slide {slide_num} ===")
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text") and shape.text:
+                            text_parts.append(shape.text)
+                extracted_text = "\n".join(text_parts).strip()
+                if len(extracted_text) > 20:
+                    print(f"   ✅ Extracted {len(extracted_text)} characters")
+                    return extracted_text
                 else:
-                    print(f"   ⚠️ Tika extraction returned no text")
-                    return f"File: {file_name}\nType: Legacy PowerPoint (.ppt)\nNote: No text extracted"
-            except ImportError:
-                print(f"   ⚠️ Apache Tika not installed - install 'tika' package and Java 11+")
+                    raise Exception("No text extracted")
+            except Exception as ppt_error:
+                # Extraction failed - index metadata only
+                print(f"   ⚠️ Legacy .ppt extraction failed: {ppt_error}")
+                print(f"   💡 Tip: Convert to .pptx for better extraction")
                 print(f"   📋 Indexing filename/path only")
-                return f"File: {file_name}\nType: Legacy PowerPoint (.ppt)\nNote: Tika not available"
-            except Exception as tika_error:
-                print(f"   ⚠️ Tika extraction failed: {tika_error}")
-                print(f"   📋 Indexing filename/path only")
-                return f"File: {file_name}\nType: Legacy PowerPoint (.ppt)\nNote: Extraction failed"
+                return f"File: {file_item['name']}\nType: Legacy PowerPoint (.ppt)\nNote: Extraction failed - convert to .pptx for full-text extraction"
 
         # Publisher files (.pub) - index metadata only
         elif file_name.endswith('.pub'):

@@ -22,7 +22,7 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 
 ### Document Support
 - **Documents**: PDF (with OCR for scanned docs!), DOCX, DOC
-- **Presentations**: PPTX, PPT (legacy .ppt via Apache Tika + Java)
+- **Presentations**: PPTX (legacy .ppt not supported - convert to .pptx)
 - **Spreadsheets**: XLSX, XLSM, CSV
 - **Data**: JSON, TXT, Markdown (MD)
 - **Images**: PNG, JPG, TIFF, BMP, GIF (with OCR)
@@ -45,7 +45,6 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 - Microsoft 365 account with OneDrive
 - Pinecone account (free tier works)
 - Claude Desktop
-- Java 11+ (optional, for legacy .ppt file support via Apache Tika)
 
 ### Quick Setup
 
@@ -358,11 +357,13 @@ SmartDrive will automatically use Azure OCR if credentials are provided, otherwi
 | Category | Formats | OCR Support |
 |----------|---------|-------------|
 | Documents | PDF, DOCX, DOC | ✅ (scanned PDFs) |
-| Presentations | PPTX, PPT | - |
+| Presentations | PPTX | - |
 | Spreadsheets | XLSX, XLSM, XLTX, XLTM, CSV | - |
 | Data | JSON, TXT, Markdown (MD) | - |
 | Images | PNG, JPG, JPEG, TIFF, BMP, GIF | ✅ |
 | Archives | ZIP | List or Extract |
+
+**Note**: Legacy PowerPoint (.ppt) files are not supported. Convert to .pptx for full-text extraction.
 
 ---
 
@@ -430,7 +431,6 @@ Open a GitHub issue with:
 - ✅ Incremental sync (pre-extraction Pinecone check)
 - ✅ Excel (.xlsx) support
 - ✅ Image OCR support (EasyOCR + Azure Computer Vision)
-- ✅ Legacy PowerPoint (.ppt) support via Apache Tika + Java
 - ✅ Token caching for auth
 - ✅ CSV support
 - ✅ JSON support

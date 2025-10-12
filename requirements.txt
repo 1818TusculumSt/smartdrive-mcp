@@ -13,6 +13,5 @@ aiohttp
 Pillow
 easyocr
 azure-ai-vision-imageanalysis
-tika
 olefile
 markdown
