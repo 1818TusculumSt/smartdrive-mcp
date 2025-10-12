@@ -688,17 +688,21 @@ def upload_to_pinecone(files_data, check_existing=True):
             print(f"   ➕ Adding (new): {file_data['name']}")
 
         # Skip files with too little content (won't generate useful embeddings)
-        text = file_data["text"][:8000]  # Truncate to reasonable length
+        full_text = file_data["text"]
 
         # Filter out files with < 50 characters of actual content
         # (headers, empty CSVs, metadata-only entries)
-        if len(text.strip()) < 50:
-            print(f"      ⏭️  Skipped (insufficient content: {len(text.strip())} chars)")
+        if len(full_text.strip()) < 50:
+            print(f"      ⏭️  Skipped (insufficient content: {len(full_text.strip())} chars)")
             skipped_count += 1
             continue
 
+        # Truncate for embedding (llama-text-embed-v2 handles up to 8192 tokens)
+        # Estimate ~4 chars per token, so 32000 chars ≈ 8000 tokens with margin
+        text_for_embedding = full_text[:32000]
+
         # Generate embedding
-        embedding = embedding_provider.get_embedding_sync(text)
+        embedding = embedding_provider.get_embedding_sync(text_for_embedding)
 
         if embedding is None:
             print(f"      ⚠️ Failed to generate embedding")
@@ -717,7 +721,7 @@ def upload_to_pinecone(files_data, check_existing=True):
                 "file_path": file_path,
                 "size": file_size,
                 "modified": file_modified,
-                "text_preview": text[:500]  # Store preview for display
+                "text_preview": full_text[:2000]  # Store larger preview (first 2000 chars)
             }
         })
 
