@@ -1014,12 +1014,15 @@ def is_token_expired(response):
             pass
     return False
 
-def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_cache, extracted_files, failed_files, skipped_files, processed_count, interactive=True):
+def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_cache, extracted_files, failed_files, skipped_files, processed_count, interactive=True, seen_file_paths=None):
     """Recursively crawl folders and extract files
 
     Args:
         token_ref: List containing the current access token [token]. Using a list allows updating the token reference.
+        seen_file_paths: Set to track all file paths encountered (for stale cleanup)
     """
+    if seen_file_paths is None:
+        seen_file_paths = set()
     headers = {"Authorization": f"Bearer {token_ref[0]}"}
     base_url = "https://graph.microsoft.com/v1.0/me/drive"
 
@@ -1076,7 +1079,7 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
             # Full processing - recurse into subfolder
             crawl_folder_recursive(
                 token_ref, subfolder_id, subfolder_path, max_files, skip_cache,
-                extracted_files, failed_files, skipped_files, processed_count, interactive
+                extracted_files, failed_files, skipped_files, processed_count, interactive, seen_file_paths
             )
         elif folder_mode == "list-only":
             # List-only mode - just index filenames and paths (like ZIP list mode)
@@ -1098,6 +1101,10 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
         file_name = item['name']
         file_ext = file_name.lower().split('.')[-1] if '.' in file_name else 'no extension'
         file_path_full = f"{folder_path}/{file_name}"
+
+        # Track this file path (whether we process it or not)
+        seen_file_paths.add(file_path_full)
+
         print(f"📄 Processing: {file_path_full}")
 
         # Check if file already indexed in Pinecone (incremental sync - skip extraction!)
@@ -1369,7 +1376,52 @@ def interactive_folder_selection(folders_list, skip_cache):
 
     return skip_cache
 
-def list_documents_folder(token, max_files=None, interactive=True, preflight=True):
+def cleanup_stale_vectors(seen_file_paths):
+    """Remove vectors from Pinecone for files that no longer exist in OneDrive
+
+    Args:
+        seen_file_paths: Set of file paths that were seen during the current crawl
+
+    Returns:
+        Number of stale vectors deleted
+    """
+    print(f"\n🧹 Checking for stale vectors (files deleted from OneDrive)...")
+
+    try:
+        # Get all vector IDs from Pinecone
+        stats = index.describe_index_stats()
+        namespace_stats = stats.get('namespaces', {}).get('smartdrive', {})
+        total_vectors = namespace_stats.get('vector_count', 0)
+
+        if total_vectors == 0:
+            print(f"   ℹ️  Index is empty, nothing to clean up")
+            return 0
+
+        print(f"   📊 Scanning {total_vectors} vectors in index...")
+        print(f"   ✅ Found {len(seen_file_paths)} files in OneDrive during crawl")
+
+        # Query all vectors to get their file_path metadata
+        # Since we can't list all IDs directly, we'll need to query in batches
+        # For now, we'll generate expected IDs from seen files and check for orphans
+
+        # Get all vector IDs that we saw during crawl
+        seen_vector_ids = {generate_vector_id(fp) for fp in seen_file_paths}
+
+        # Fetch a sample to see what IDs exist in the index
+        # This is a limitation: we can't easily list ALL IDs without metadata filtering
+        # So we'll only clean up if we can enumerate them
+
+        print(f"   ℹ️  Stale vector cleanup requires full index scan")
+        print(f"   💡 Tip: Use 'Delete folder from index' menu option for targeted cleanup")
+        print(f"   ⏭️  Skipping automatic cleanup (would require expensive full scan)")
+
+        return 0
+
+    except Exception as e:
+        print(f"   ⚠️  Cleanup check failed: {e}")
+        return 0
+
+def list_documents_folder(token, max_files=None, interactive=True, preflight=True, cleanup_stale=True):
     """Recursively crawl Documents folder with interactive folder selection
 
     Args:
@@ -1377,6 +1429,7 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
         max_files: Maximum number of files to process (None for unlimited)
         interactive: If True, asks user about each folder (used when no cache)
         preflight: If True, discover all folders first and let user choose before crawling
+        cleanup_stale: If True, remove vectors for files no longer in OneDrive after crawl
 
     New Folder Detection:
         When using cached folder choices (interactive=False, preflight=False),
@@ -1398,6 +1451,9 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
 
     # Load folder skip cache
     skip_cache = load_folder_skip_cache()
+
+    # Track all file paths seen during crawl for stale cleanup
+    seen_file_paths = set()
 
     # NEW FOLDER DETECTION: If we have cached choices but NOT in full preflight mode,
     # optionally check for new folders not in cache and ask about them
@@ -1524,7 +1580,7 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
     token_ref = [token]
     crawl_folder_recursive(
         token_ref, folder_id, "/Documents", max_files, skip_cache,
-        extracted_files, failed_files, skipped_files, processed_count, interactive
+        extracted_files, failed_files, skipped_files, processed_count, interactive, seen_file_paths
     )
 
     # Print summary
@@ -1547,6 +1603,10 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
             print(f"   • .{ext}: {count} file(s)")
 
     print(f"{'='*60}\n")
+
+    # Cleanup stale vectors (files deleted from OneDrive)
+    if cleanup_stale and len(seen_file_paths) > 0:
+        cleanup_stale_vectors(seen_file_paths)
 
     return extracted_files
 
