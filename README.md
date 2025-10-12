@@ -12,7 +12,9 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 
 ### Core Capabilities
 - **Semantic Search**: Natural language queries across your entire OneDrive
-- **Flexible Embeddings**: Choose local (free), Pinecone inference, or custom API
+- **Flexible Embeddings**: Choose local (free), Pinecone inference, Voyage AI, or custom API
+- **Incremental Sync**: Smart detection of unchanged files - only indexes new/modified content
+- **New Folder Detection**: Optionally check for new folders before crawling (configurable)
 - **Privacy-First**: Your documents stay in your OneDrive; only embeddings are stored
 - **MCP Integration**: Works natively with Claude Desktop
 - **Interactive Folder Selection**: Choose which folders to index, skip what you don't need
@@ -20,11 +22,12 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 
 ### Document Support
 - **Documents**: PDF (with OCR for scanned docs!), DOCX, DOC
-- **Presentations**: PPTX, PPT
+- **Presentations**: PPTX, PPT (legacy .ppt via Apache Tika + Java)
 - **Spreadsheets**: XLSX, XLSM, CSV
 - **Data**: JSON, TXT, Markdown (MD)
 - **Images**: PNG, JPG, TIFF, BMP, GIF (with OCR)
 - **Archives**: ZIP files (list contents or extract and index)
+- **Graceful Fallbacks**: Corrupted/malformed files indexed with metadata only
 
 ### OCR Support
 - **Local OCR**: EasyOCR for scanned PDFs and images (free, no external software!)
@@ -42,6 +45,7 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 - Microsoft 365 account with OneDrive
 - Pinecone account (free tier works)
 - Claude Desktop
+- Java 11+ (optional, for legacy .ppt file support via Apache Tika)
 
 ### Quick Setup
 
@@ -70,7 +74,10 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 4. **Create Pinecone Index**
    - Go to [Pinecone](https://www.pinecone.io/) → Create Index
    - Name: `smartdrive`
-   - Dimensions: `384`
+   - Dimensions: Choose based on your embedding provider:
+     - `384` for local (all-MiniLM-L6-v2)
+     - `1024` for Pinecone inference (llama-text-embed-v2)
+     - `2048` for Voyage AI (voyage-3-large)
    - Metric: `cosine`
    - Vector type: `dense`
    - Copy your **API Key** and **Index Host**
@@ -87,9 +94,14 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
    MICROSOFT_CLIENT_ID=your_azure_client_id
    MICROSOFT_TENANT_ID=consumers
 
-   # Optional: Choose your embedding provider (local, pinecone, or api)
+   # Optional: Choose your embedding provider (local, pinecone, voyage, or api)
    EMBEDDING_PROVIDER=local
    EMBEDDING_MODEL=all-MiniLM-L6-v2
+
+   # For Voyage AI (32K token context, 2048 dims, $0.10/1M tokens):
+   # EMBEDDING_PROVIDER=voyage
+   # VOYAGE_API_KEY=your_voyage_api_key
+   # VOYAGE_MODEL=voyage-3-large
    ```
 
 6. **Index your OneDrive**
@@ -233,23 +245,37 @@ After crawling, you'll get a detailed summary:
 
 ### Embedding Providers
 
-SmartDrive supports three embedding providers:
+SmartDrive supports four embedding providers:
 
-#### Local
+#### Local (Free, Private)
 ```env
 EMBEDDING_PROVIDER=local
 EMBEDDING_MODEL=all-MiniLM-L6-v2
 ```
-- Runs on your machine (sentence-transformers)
-- No API calls or costs
-- Complete privacy
+- ✅ Runs on your machine (sentence-transformers)
+- ✅ No API calls or costs
+- ✅ Complete privacy
+- 📊 384 dimensions, ~512 token context
+
+#### Voyage AI (Recommended for Large Documents) 🚀
+```env
+EMBEDDING_PROVIDER=voyage
+VOYAGE_API_KEY=your_voyage_api_key
+VOYAGE_MODEL=voyage-3-large
+```
+- ✅ **32,000 token context** (128K chars) - embed entire 50+ page PDFs!
+- ✅ **2048 dimensions** for maximum quality
+- ✅ Fast cloud API, optimized for long documents
+- 💰 **$0.10 per 1M tokens** (~$0.10-0.50 for 600 typical files)
+- 🎯 Best for: Academic papers, books, reports, large documents
 
 #### Pinecone Inference
 ```env
 EMBEDDING_PROVIDER=pinecone
-EMBEDDING_MODEL=multilingual-e5-large
+EMBEDDING_MODEL=llama-text-embed-v2
 ```
 - Hosted embedding models via Pinecone
+- 1024 dimensions (high quality)
 - Requires Pinecone API key
 - Access to specialized models
 
@@ -263,6 +289,20 @@ EMBEDDING_MODEL=your-model-name
 - OpenAI-compatible API format
 - Use any embedding service (OpenAI, Cohere, etc.)
 - Self-hosted options supported
+
+### Incremental Sync
+
+SmartDrive intelligently skips unchanged files to save time and API costs:
+
+- ✅ **Pre-extraction check**: Checks Pinecone before downloading/extracting files
+- ✅ **Metadata comparison**: Compares file modified date and size
+- ✅ **Skip unchanged**: Files that haven't changed are skipped entirely
+- ✅ **Update only modified**: Only re-indexes files that changed
+- ⚡ **~100x faster** for re-indexing mostly unchanged folders
+
+**New Folder Detection**: When running with cached folder choices, you can optionally check for new folders:
+- Press Enter = Skip check (fast, uses cache only)
+- Type 'check' = Discover new folders and prompt for each one
 
 ### OCR Configuration
 
@@ -386,15 +426,22 @@ Open a GitHub issue with:
 ### Completed ✅
 - ✅ Recursive folder crawling
 - ✅ Interactive folder selection with caching
+- ✅ New folder detection (optional pre-crawl check)
+- ✅ Incremental sync (pre-extraction Pinecone check)
 - ✅ Excel (.xlsx) support
-- ✅ Image OCR support (EasyOCR)
+- ✅ Image OCR support (EasyOCR + Azure Computer Vision)
+- ✅ Legacy PowerPoint (.ppt) support via Apache Tika + Java
 - ✅ Token caching for auth
 - ✅ CSV support
 - ✅ JSON support
+- ✅ Markdown (.md) support
 - ✅ ZIP file handling (list + extract)
-- ✅ Scanned PDF OCR
+- ✅ Scanned PDF OCR with page-by-page progress
 - ✅ Progress indicators
 - ✅ Comprehensive error reporting
+- ✅ Voyage AI embedding support (32K token context!)
+- ✅ Pinecone inference with 1024-dim embeddings
+- ✅ Graceful fallbacks for corrupted files
 
 ### Coming Soon 🚀
 
