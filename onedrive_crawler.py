@@ -47,7 +47,12 @@ index = pc.Index(
 )
 
 # Initialize embedding provider
-print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({settings.EMBEDDING_MODEL})...")
+if settings.EMBEDDING_PROVIDER == "voyage":
+    print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({settings.VOYAGE_MODEL})...")
+elif settings.EMBEDDING_PROVIDER == "pinecone":
+    print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({settings.EMBEDDING_MODEL})...")
+else:
+    print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({settings.EMBEDDING_MODEL})...")
 embedding_provider = EmbeddingProvider()
 print("✅ Embedding provider loaded\n")
 
