@@ -13,5 +13,6 @@ aiohttp
 Pillow
 easyocr
 azure-ai-vision-imageanalysis
+azure-ai-formrecognizer
 olefile
 markdown

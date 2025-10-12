@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     VOYAGE_API_KEY: Optional[str] = None
     VOYAGE_MODEL: str = "voyage-3-large"
 
+    # Azure OCR Configuration
+    AZURE_VISION_KEY: Optional[str] = None
+    AZURE_VISION_ENDPOINT: Optional[str] = None
+    OCR_STRICT_MODE: bool = True
+
+    # Azure Document Intelligence Configuration
+    AZURE_FORM_RECOGNIZER_KEY: Optional[str] = None
+    AZURE_FORM_RECOGNIZER_ENDPOINT: Optional[str] = None
+    USE_DOCUMENT_INTELLIGENCE: str = "selective"  # Options: "never", "selective", "always"
+
     # Performance Settings
     EMBEDDING_TIMEOUT: int = 30
 

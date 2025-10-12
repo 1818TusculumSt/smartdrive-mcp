@@ -23,6 +23,7 @@ COPY onedrive_crawler.py .
 COPY embeddings.py .
 COPY config.py .
 COPY smartdrive_server.py .
+COPY document_intelligence.py .
 
 # Create directories for cache files
 RUN mkdir -p /root/.cache

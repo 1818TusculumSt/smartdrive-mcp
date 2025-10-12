@@ -22,6 +22,7 @@ import easyocr
 from pinecone import Pinecone
 from embeddings import EmbeddingProvider
 from config import settings
+from document_intelligence import should_use_document_intelligence, extract_with_document_intelligence
 
 load_dotenv()
 
@@ -321,6 +322,16 @@ def extract_text_from_file(token, file_item):
                     text += page_text + "\n"
 
             # If no text found or very little text (likely scanned), use OCR
+            # Try Document Intelligence for forms/tax documents (if applicable)
+            if should_use_document_intelligence(file_name):
+                doc_intel_text = extract_with_document_intelligence(content)
+                if doc_intel_text and len(doc_intel_text.strip()) >= 50:
+                    text = doc_intel_text
+                    pdf.close()
+                    return text.strip()
+                else:
+                    print(f"      🔄 Falling back to regular OCR...")
+
             if len(text.strip()) < 50:
                 print(f"   🔍 Scanned PDF detected ({pdf.page_count} pages), using OCR...")
 
@@ -1114,11 +1125,16 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
 
         try:
             result = index.fetch(ids=[vector_id], namespace="smartdrive")
-            if vector_id in result.get('vectors', {}):
+            # FetchResponse has a 'vectors' attribute (dict), not dict methods
+            vectors_dict = result.vectors if hasattr(result, 'vectors') else {}
+
+            if vector_id in vectors_dict:
                 # File exists in Pinecone - check if it's changed
-                existing_vector = result['vectors'][vector_id]
-                existing_modified = existing_vector.get('metadata', {}).get('modified', '')
-                existing_size = existing_vector.get('metadata', {}).get('size', 0)
+                existing_vector = vectors_dict[vector_id]
+                # Vector object has 'metadata' attribute (dict)
+                existing_metadata = existing_vector.metadata if hasattr(existing_vector, 'metadata') else {}
+                existing_modified = existing_metadata.get('modified', '')
+                existing_size = existing_metadata.get('size', 0)
 
                 if existing_modified == file_modified and existing_size == file_size:
                     # File unchanged - skip extraction entirely!
@@ -1130,6 +1146,7 @@ def crawl_folder_recursive(token_ref, folder_id, folder_path, max_files, skip_ca
                     print(f"   🔄 File modified - re-indexing")
         except Exception as e:
             # File not in Pinecone or error checking - will extract
+            print(f"   🔍 Pinecone check failed: {type(e).__name__}: {str(e)}")
             pass
 
         text = extract_text_from_file(token_ref[0], item)
@@ -1400,22 +1417,56 @@ def cleanup_stale_vectors(seen_file_paths):
         print(f"   📊 Scanning {total_vectors} vectors in index...")
         print(f"   ✅ Found {len(seen_file_paths)} files in OneDrive during crawl")
 
-        # Query all vectors to get their file_path metadata
-        # Since we can't list all IDs directly, we'll need to query in batches
-        # For now, we'll generate expected IDs from seen files and check for orphans
-
-        # Get all vector IDs that we saw during crawl
+        # Generate set of vector IDs we saw during this crawl
         seen_vector_ids = {generate_vector_id(fp) for fp in seen_file_paths}
+        print(f"   🔍 Generated {len(seen_vector_ids)} vector IDs from seen files")
 
-        # Fetch a sample to see what IDs exist in the index
-        # This is a limitation: we can't easily list ALL IDs without metadata filtering
-        # So we'll only clean up if we can enumerate them
+        # List all vectors in the index using pagination
+        print(f"   📊 Enumerating all vectors in index...")
+        all_vector_ids = []
 
-        print(f"   ℹ️  Stale vector cleanup requires full index scan")
-        print(f"   💡 Tip: Use 'Delete folder from index' menu option for targeted cleanup")
-        print(f"   ⏭️  Skipping automatic cleanup (would require expensive full scan)")
+        # Pinecone list() returns paginated results
+        try:
+            for ids in index.list(namespace="smartdrive"):
+                all_vector_ids.extend(ids)
 
-        return 0
+            print(f"   ✅ Found {len(all_vector_ids)} total vectors in index")
+        except Exception as list_error:
+            print(f"   ⚠️ Could not list vectors: {list_error}")
+            print(f"   💡 Tip: Use 'Delete folder from index' menu option for targeted cleanup")
+            return 0
+
+        # Find stale vectors (in index but not seen during crawl)
+        stale_vector_ids = [vid for vid in all_vector_ids if vid not in seen_vector_ids]
+
+        if len(stale_vector_ids) == 0:
+            print(f"   ✅ No stale vectors found - index is clean!")
+            return 0
+
+        print(f"   🗑️  Found {len(stale_vector_ids)} stale vector(s) to delete")
+
+        # Ask for confirmation
+        print(f"\n⚠️  WARNING: This will DELETE {len(stale_vector_ids)} vector(s) from the index!")
+        print(f"   These are files that no longer exist in your OneDrive.")
+        confirm = input("   Proceed with cleanup? [y/N]: ").strip().lower()
+
+        if confirm not in ['y', 'yes']:
+            print(f"   ❌ Cleanup cancelled")
+            return 0
+
+        # Delete in batches of 100
+        deleted_count = 0
+        for i in range(0, len(stale_vector_ids), 100):
+            batch_ids = stale_vector_ids[i:i+100]
+            try:
+                index.delete(ids=batch_ids, namespace="smartdrive")
+                deleted_count += len(batch_ids)
+                print(f"   🗑️  Deleted batch: {deleted_count}/{len(stale_vector_ids)} vectors")
+            except Exception as e:
+                print(f"   ⚠️ Batch delete failed: {e}")
+
+        print(f"\n✅ Cleanup complete! Deleted {deleted_count} stale vector(s)")
+        return deleted_count
 
     except Exception as e:
         print(f"   ⚠️  Cleanup check failed: {e}")
@@ -1605,8 +1656,14 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
     print(f"{'='*60}\n")
 
     # Cleanup stale vectors (files deleted from OneDrive)
+    # ONLY run if we did a full crawl (no file limit)
     if cleanup_stale and len(seen_file_paths) > 0:
-        cleanup_stale_vectors(seen_file_paths)
+        if processed_count[0] >= max_files and max_files != 999999:
+            print(f"\n⚠️  Stale cleanup SKIPPED - you used a file limit ({max_files})")
+            print(f"   Cleanup only runs after a FULL crawl (no limit)")
+            print(f"   💡 Tip: Run crawler with no limit to enable cleanup")
+        else:
+            cleanup_stale_vectors(seen_file_paths)
 
     return extracted_files
 

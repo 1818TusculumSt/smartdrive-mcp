@@ -81,12 +81,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         for i, match in enumerate(results.matches, 1):
             meta = match.metadata
             score = match.score
-            
+
+            # Get full text or fallback to preview
+            full_text = meta.get('text', meta.get('text_preview', 'No content available'))
+
             output += f"**Result {i}** (Score: {score:.3f})\n"
             output += f"📄 **File:** {meta.get('file_name', 'Unknown')}\n"
             output += f"📁 **Path:** {meta.get('file_path', 'Unknown')}\n"
             output += f"📅 **Modified:** {meta.get('modified', 'Unknown')}\n"
-            output += f"📝 **Preview:**\n{meta.get('text_preview', 'No preview available')}\n\n"
+            output += f"📝 **Content:**\n{full_text}\n\n"
             output += "---\n\n"
         
         return [TextContent(type="text", text=output)]
