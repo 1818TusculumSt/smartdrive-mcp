@@ -8,6 +8,12 @@ services:
     build: .
     container_name: smartdrive-mcp
 
+    # DNS servers for network resolution
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+
     # Mount .env file for secrets
     env_file:
       - .env
