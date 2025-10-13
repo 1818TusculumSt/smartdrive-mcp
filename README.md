@@ -2,23 +2,25 @@
 
 # SmartDrive 🧠☁️
 
-**Semantic search for your entire OneDrive, powered by Pinecone vector search.**
+**Semantic search for your entire OneDrive, powered by RAG architecture with Pinecone vector search and Azure Blob Storage.**
 
-SmartDrive is an MCP (Model Context Protocol) server that brings intelligent semantic search to your Microsoft OneDrive documents. Ask Claude to find "tax forms" and it'll surface your 1099s, W-2s, and related docs—even if those exact words aren't in the filename.
+SmartDrive is an MCP (Model Context Protocol) server that brings intelligent semantic search to your Microsoft OneDrive documents. Ask Claude to find "tax forms" and it'll surface your 1099s, W-2s, and related docs—even if those exact words aren't in the filename. Built with a true RAG architecture: hybrid vector search (semantic + keyword) in Pinecone, full document storage in Azure Blob.
 
 ---
 
 ## 🔥 Features
 
 ### Core Capabilities
-- **Semantic Search**: Natural language queries across your entire OneDrive
-- **Flexible Embeddings**: Choose local (free), Pinecone inference, Voyage AI, or custom API
+- **RAG Architecture**: True retrieval-augmented generation with vectors in Pinecone, full text in Azure Blob
+- **Hybrid Search**: Combines semantic (dense vectors) + keyword (sparse BM25) for maximum accuracy
+- **Semantic Search**: Natural language queries - "tax forms" finds W-2s, 1099s, etc.
+- **Flexible Embeddings**: Choose local (free), Voyage AI (recommended), Pinecone inference, or OpenAI-compatible APIs
+- **ONE Vector Per File**: No chunking = 12.5x faster indexing, simpler search, better results
+- **100K Char Embeddings**: Full small docs embedded, intelligent sampling (80% beginning + 20% end) for large files
 - **Incremental Sync**: Smart detection of unchanged files - only indexes new/modified content
-- **New Folder Detection**: Optionally check for new folders before crawling (configurable)
-- **Privacy-First**: Your documents stay in your OneDrive; only embeddings are stored
-- **MCP Integration**: Works natively with Claude Desktop
 - **Interactive Folder Selection**: Choose which folders to index, skip what you don't need
 - **Smart Caching**: Remembers authentication and folder choices between runs
+- **MCP Integration**: Two tools for Claude Desktop: `search_onedrive` and `read_document`
 
 ### Document Support
 - **Documents**: PDF (with OCR for scanned docs!), DOCX, DOC
@@ -45,7 +47,8 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 
 - Python 3.10+
 - Microsoft 365 account with OneDrive
-- Pinecone account (free tier works)
+- Azure account (for Blob Storage - free tier available)
+- Pinecone account (free tier available with hybrid search support)
 - Claude Desktop
 
 ### Quick Setup
@@ -78,34 +81,52 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
    - Dimensions: Choose based on your embedding provider:
      - `384` for local (all-MiniLM-L6-v2)
      - `1024` for Pinecone inference (llama-text-embed-v2)
-     - `2048` for Voyage AI (voyage-3-large)
+     - `2048` for Voyage AI (voyage-3-large, recommended)
    - Metric: `cosine`
-   - Vector type: `dense`
-   - Copy your **API Key** and **Index Host**
+   - Cloud: AWS (free tier available)
+   - Region: Choose closest to you (e.g., `us-east-1`)
+   - **Important**: Check "Enable Hybrid Search" for best results (combines semantic + keyword search)
+   - Copy your **API Key** and **Index Host** after creation
 
-5. **Configure `.env`**
+5. **Create Azure Blob Storage Container**
+   - Go to [Azure Portal](https://portal.azure.com) → **Storage Accounts** → Create new (or use existing)
+   - Choose **Standard** performance tier (general purpose v2)
+   - After creation, go to **Access keys** → Copy **Connection string**
+   - Create a container named `documents` (or use your own name)
+
+6. **Configure `.env`**
 
    Copy `.env.example` to `.env` and fill in your values:
 
    ```env
+   # Pinecone (required)
    PINECONE_API_KEY=your_pinecone_api_key
    PINECONE_INDEX_NAME=smartdrive
    PINECONE_HOST=smartdrive-xxxxx.svc.aped-xxxx-xxxx.pinecone.io
 
+   # Microsoft (required)
    MICROSOFT_CLIENT_ID=your_azure_client_id
    MICROSOFT_TENANT_ID=consumers
 
-   # Optional: Choose your embedding provider (local, pinecone, voyage, or api)
+   # Azure Blob Storage (required for RAG)
+   AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
+   AZURE_STORAGE_CONTAINER_NAME=documents
+
+   # Embedding provider (optional, default: local)
    EMBEDDING_PROVIDER=local
    EMBEDDING_MODEL=all-MiniLM-L6-v2
 
-   # For Voyage AI (32K token context, 2048 dims, $0.10/1M tokens):
+   # For Voyage AI (recommended - 32K token context, 2048 dims, $0.10/1M tokens):
    # EMBEDDING_PROVIDER=voyage
    # VOYAGE_API_KEY=your_voyage_api_key
    # VOYAGE_MODEL=voyage-3-large
+
+   # Azure Computer Vision OCR (optional - 10-20x faster than local)
+   # AZURE_VISION_KEY=your_azure_vision_key
+   # AZURE_VISION_ENDPOINT=https://your-region.api.cognitive.microsoft.com/
    ```
 
-6. **Index your OneDrive**
+7. **Index your OneDrive**
    ```bash
    python onedrive_crawler.py
    ```
@@ -128,7 +149,7 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
    - Answer Yes/No for each folder as the crawler discovers them
    - Use "always yes" or "skip always" to remember your choices!
 
-7. **Add to Claude Desktop**
+8. **Add to Claude Desktop**
 
    Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac):
 
@@ -143,14 +164,18 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
          "env": {
            "PINECONE_API_KEY": "your_pinecone_api_key",
            "PINECONE_INDEX_NAME": "smartdrive",
-           "PINECONE_HOST": "smartdrive-xxxxx.svc.aped-xxxx-xxxx.pinecone.io"
+           "PINECONE_HOST": "smartdrive-xxxxx.svc.aped-xxxx-xxxx.pinecone.io",
+           "AZURE_STORAGE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=...",
+           "AZURE_STORAGE_CONTAINER_NAME": "documents"
          }
        }
      }
    }
    ```
 
-8. **Restart Claude Desktop**
+   **Note**: The MCP server only needs Pinecone and Azure Blob Storage credentials. The crawler needs additional credentials (Microsoft Graph API, OCR services, embedding API keys).
+
+9. **Restart Claude Desktop**
 
 ---
 
@@ -247,14 +272,28 @@ Point Claude Desktop to the Docker container's MCP server:
 
 ### In Claude Desktop
 
+SmartDrive provides two MCP tools that Claude can use:
+
+**1. `search_onedrive` - Hybrid semantic + keyword search**
+- Searches Pinecone with dense (semantic) + sparse (BM25/keyword) vectors
+- Returns top-k results with file paths, dates, scores, and content previews
+- Automatically fetches full text from Azure Blob for matched documents
+- Smart truncation keeps responses under 900KB (shows first 2K chars per doc)
+
+**2. `read_document` - Retrieve full document text**
+- Fetches complete document content from Azure Blob Storage by `doc_id`
+- Use this when you need the full text of a search result
+- Returns entire document (no truncation)
+
 Simply ask Claude natural language questions:
 
 - "Search my OneDrive for resume"
 - "Find tax documents from 2024"
 - "Show me project proposals"
 - "Where are my meeting notes about the Q4 budget?"
+- "Read the full content of document doc_abc123" (after getting doc_id from search)
 
-SmartDrive will semantically search your indexed documents and return relevant results with file paths, modification dates, and content previews.
+Claude will automatically use `search_onedrive` to find relevant documents, and can use `read_document` to retrieve full content when needed.
 
 ### Interactive Crawler Menu
 
@@ -309,10 +348,11 @@ SmartDrive uses a **true RAG (Retrieval Augmented Generation) architecture** tha
          ▼
 ┌─────────────────────┐       ┌──────────────────┐
 │ smartdrive_server.py│◄──────┤  Pinecone Index  │
-│  (MCP Server)       │       │  (Vectors Only)  │
+│  (MCP Server)       │       │ (Hybrid Vectors) │
 └────────┬────────────┘       └──────────────────┘
          │                             │
-         │                             ├─ 2048-dim embeddings
+         │                             ├─ Dense vectors (semantic)
+         │                             ├─ Sparse vectors (BM25/keyword)
          │                             ├─ Minimal metadata
          │                             └─ doc_id references
          │
@@ -322,61 +362,89 @@ SmartDrive uses a **true RAG (Retrieval Augmented Generation) architecture** tha
               └──────────────────┘
                       ├─ Complete documents
                       ├─ Unlimited size
-                      └─ Fast retrieval
+                      └─ Fast retrieval (~50ms)
 ```
 
-### RAG Architecture Benefits
+### How It Works
 
-**Traditional Approach (Old):**
-- ❌ Chunked documents into multiple vectors (slow uploads)
-- ❌ Limited by Pinecone's 40KB metadata size
-- ❌ Truncated document previews
-- ❌ Multiple vectors per file = slower search
+**1. Indexing (onedrive_crawler.py)**
 
-**RAG Approach (Current):**
-- ✅ **ONE vector per file** (12.5x faster uploads)
-- ✅ **Full text in Azure Blob** (unlimited size, ~$0.02/GB/month)
-- ✅ **Up to 100K chars embedded** (entire small docs, smart sampling for large ones)
-- ✅ **2048-dimension embeddings** (maximum quality with Voyage AI)
-- ✅ **Hybrid search** (dense + sparse vectors for precision)
-- ✅ **Rich metadata** (file type, category, size, date, coverage indicator)
+When you run the crawler, here's what happens for each OneDrive file:
 
-### Crawler Flow
+1. **Authenticate** via Microsoft Graph API (device code flow, cached)
+2. **Crawl OneDrive** recursively with interactive folder selection
+3. **Extract text** from documents:
+   - **PDFs**: PyMuPDF (fitz) extracts text directly
+   - **Scanned PDFs/Images**: OCR with Azure Document Intelligence → Azure Computer Vision → EasyOCR fallback chain
+   - **Office docs**: python-docx (DOCX), python-pptx (PPTX), openpyxl (XLSX)
+   - **Text files**: Direct read (TXT, JSON, MD, CSV)
+   - **Archives**: List or extract ZIP contents
+4. **Generate embeddings**:
+   - **Dense vector**: Configurable provider (local/Voyage AI/Pinecone/OpenAI-compatible API)
+   - **Sparse vector**: BM25 encoder for keyword matching (auto-truncates to 2048 terms)
+   - Up to 100K chars embedded (smart sampling: 80% beginning + 20% end for large files)
+5. **Store in two places**:
+   - **Azure Blob Storage**: Full document text → returns `doc_id` (SHA256 hash of file path)
+   - **Pinecone**: Dense + sparse vectors + minimal metadata + `doc_id` reference
+6. **Incremental sync**: Checks Pinecone metadata (modified date + size) to skip unchanged files
+7. **Cleanup**: Removes stale vectors from Pinecone + orphaned blobs from Azure
 
-1. **Authenticate**: Microsoft Graph API (cached for future runs)
-2. **Crawl**: Recursively discover OneDrive files
-3. **Extract**: Text from documents (PDF, DOCX, XLSX, images with OCR, etc.)
-4. **Store Full Text**: Upload complete document to Azure Blob → get `doc_id`
-5. **Generate Embedding**:
-   - Use up to 100K chars (~25K tokens) of document content
-   - Add structured metadata (filename, type, path)
-   - Generate 2048-dim dense embedding (Voyage AI)
-   - Generate sparse embedding (BM25, truncated to 2048 terms if needed)
-6. **Index**: Store ONE vector in Pinecone with `doc_id` reference
-7. **Cleanup**: Remove stale documents from both Pinecone and Azure
+**2. Searching (smartdrive_server.py)**
 
-### Search Flow
+When Claude searches your OneDrive via MCP:
 
-1. **Query**: Claude sends natural language question to MCP server
-2. **Embed Query**: Convert query to 2048-dim vector (same model as indexing)
-3. **Hybrid Search**: Query Pinecone with dense + sparse vectors
-4. **Retrieve Results**: Get top-k matches with metadata and `doc_id`
-5. **Fetch Full Text**: Retrieve complete documents from Azure Blob using `doc_id`
-6. **Return to Claude**: Full context for accurate answers
+1. **Query embedding**: Convert natural language query to dense + sparse vectors
+2. **Hybrid search**: Query Pinecone with both vectors for semantic + keyword matching
+3. **Retrieve matches**: Get top-k results with `doc_id` and metadata
+4. **Fetch full text**: Retrieve complete documents from Azure Blob using `doc_id`
+5. **Smart truncation**: Preview first 2K chars per result, keep total response <900KB
+6. **Return to Claude**: Formatted results with file paths, dates, scores, and content
 
-### Embedding Optimization
+### Components
 
-**Smart Content Selection:**
-- Documents ≤100K chars: **Full document embedded** (perfect search)
-- Documents >100K chars: **Intelligent sampling** (80K beginning + 20K end)
-- Enhanced with structured metadata (filename, type, path)
+**Core Files:**
+- [smartdrive_server.py](smartdrive_server.py) - MCP server exposing `search_onedrive` and `read_document` tools
+- [onedrive_crawler.py](onedrive_crawler.py) - Indexing script: crawls OneDrive, extracts text, generates embeddings, stores in Pinecone + Azure Blob
+- [embeddings.py](embeddings.py) - Embedding provider abstraction (local/Voyage/Pinecone/OpenAI-compatible APIs)
+- [document_storage.py](document_storage.py) - Azure Blob Storage interface for full document text
+- [document_intelligence.py](document_intelligence.py) - Azure Document Intelligence integration for advanced form/table extraction
+- [config.py](config.py) - Configuration management with pydantic-settings
 
-**Why This Is Better:**
-- **12.5x more context** (100K vs 8K chars)
-- **Semantic understanding** of entire documents
-- **No chunking overhead** (1 vector vs 10+)
-- **Faster uploads** to Pinecone
-- **Better search accuracy** (more context = better matching)
+**Dependencies:**
+- **Pinecone**: Vector database for hybrid search (dense + sparse vectors)
+- **Azure Blob Storage**: Document storage (full text, unlimited size)
+- **Microsoft Graph API**: OneDrive file access (device code flow auth)
+- **PyMuPDF (fitz)**: PDF text extraction
+- **python-docx, python-pptx, openpyxl**: Office document parsing
+- **EasyOCR**: Local OCR fallback (CPU-based, ~10-30 sec/page)
+- **Azure Computer Vision** (optional): Cloud OCR (10-20x faster, ~1-3 sec/page)
+- **Azure Document Intelligence** (optional): Advanced form/table extraction
+- **sentence-transformers**: Local embedding model (default: all-MiniLM-L6-v2)
+- **pinecone-text**: BM25 encoder for sparse vectors (keyword matching)
+
+### Key Architecture Decisions
+
+**Why RAG (vectors separate from full text)?**
+- ✅ **No metadata limits**: Pinecone has 40KB metadata cap, Azure Blob has unlimited storage
+- ✅ **ONE vector per file**: No chunking = 12.5x faster indexing, simpler search
+- ✅ **Full context retrieval**: Search finds relevant docs, then retrieves complete text
+- ✅ **Cost-efficient**: ~$0.02/GB/month Azure storage vs expensive vector metadata
+
+**Why hybrid search (dense + sparse)?**
+- ✅ **Dense vectors**: Semantic understanding ("tax forms" matches "W-2", "1099")
+- ✅ **Sparse vectors**: Exact keyword matching (filename search, acronyms)
+- ✅ **Better accuracy**: Combines semantic similarity with keyword precision
+
+**Why 100K char embeddings?**
+- ✅ **Full document understanding**: Entire small docs embedded, smart sampling for large ones
+- ✅ **No chunking overhead**: 1 vector vs 10+ per file
+- ✅ **Faster search**: Fewer vectors to query
+- ✅ **More context**: Voyage AI supports 32K tokens (128K chars), we use 100K for efficiency
+
+**Why incremental sync?**
+- ✅ **Speed**: Skips unchanged files (~100x faster for re-indexing)
+- ✅ **Cost savings**: No re-embedding unchanged documents
+- ✅ **Metadata comparison**: Checks modified date + file size in Pinecone before extraction
 
 ---
 
@@ -691,17 +759,19 @@ Open a GitHub issue with:
 - ✅ Smart timeout handling (2-minute safety)
 - ✅ OCR strict mode (Azure-only, no fallback)
 
-**RAG Architecture (NEW!):**
-- ✅ **True RAG implementation**: Vectors in Pinecone, full text in Azure Blob
+**RAG Architecture:**
+- ✅ **True RAG implementation**: Vectors in Pinecone, full text in Azure Blob Storage
 - ✅ **ONE vector per file** (no chunking, 12.5x faster uploads)
 - ✅ **100K char embeddings** (entire small docs, intelligent sampling for large)
-- ✅ **2048-dimension Voyage AI** embeddings for maximum quality
-- ✅ **Hybrid search**: Dense (semantic) + sparse (keyword) vectors
+- ✅ **2048-dimension Voyage AI** embeddings for maximum quality (configurable: 384/1024/2048)
+- ✅ **Hybrid search**: Dense (semantic) + sparse (BM25/keyword) vectors
 - ✅ **Rich metadata**: File type categorization, size, dates, coverage indicator
-- ✅ **Azure Blob Storage**: Unlimited document size storage
+- ✅ **Azure Blob Storage**: Unlimited document size storage (~$0.02/GB/month)
 - ✅ **Smart cleanup**: Removes stale docs from both Pinecone and Azure
 - ✅ **Duplicate prevention**: Azure checks existence before upload
 - ✅ **Sparse vector handling**: Auto-truncates to 2048 terms (Pinecone limit)
+- ✅ **Two MCP tools**: `search_onedrive` (hybrid search) + `read_document` (full text retrieval)
+- ✅ **Smart result truncation**: Keeps responses under 900KB to prevent MCP 1MB limit issues
 
 **Embedding Providers:**
 - ✅ Local embeddings (sentence-transformers, free)
@@ -770,4 +840,24 @@ Built with 🔥 by [@1818TusculumSt](https://github.com/1818TusculumSt)
 
 ---
 
-**Remember:** This tool is designed to be cost-free for embeddings. Keep it that way for the community. 💪
+## 💰 Cost Breakdown
+
+**Free Tier Setup (Recommended for Testing):**
+- ✅ **Embeddings**: Local (sentence-transformers) - $0/month
+- ✅ **Pinecone**: Free tier - 100K vectors, hybrid search enabled - $0/month
+- ✅ **Azure Blob Storage**: Free tier - 5GB, 20K read ops/month - $0/month
+- ✅ **OCR**: Local EasyOCR - $0/month (slower but free)
+- **Total**: $0/month for small-to-medium OneDrive libraries (<1000 files)
+
+**Production Setup (Recommended for Large Libraries):**
+- 💰 **Embeddings**: Voyage AI - ~$0.10-0.50 for 600 typical files (one-time indexing cost)
+- 💰 **Pinecone**: Serverless - ~$0.03/month per 100K vectors (pay-as-you-go)
+- 💰 **Azure Blob Storage**: ~$0.02/GB/month (~$0.02/month for 500 docs @ 50KB avg)
+- 💰 **OCR** (optional): Azure Computer Vision - Free tier: 5K pages/month, Paid: $1.50/1000 pages
+- **Total**: ~$0.50-2.00/month for typical use (1000-5000 files)
+
+**Tips to Minimize Costs:**
+- Use local embeddings (free) instead of Voyage AI if you don't need 32K token context
+- Azure Blob free tier covers most personal use cases (5GB = ~100K documents)
+- Pinecone free tier covers up to 100K vectors (plenty for personal OneDrive)
+- Local EasyOCR is free but slow - use Azure OCR only if you have lots of scanned docs
