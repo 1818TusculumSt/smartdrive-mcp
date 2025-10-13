@@ -10,6 +10,7 @@ import hashlib
 import logging
 from typing import Optional
 from azure.storage.blob import BlobServiceClient, ContentSettings
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,12 @@ class DocumentStorage:
 
     def __init__(self):
         """Initialize Azure Blob Storage client"""
-        connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-        container_name = os.getenv("AZURE_STORAGE_CONTAINER_NAME", "documents")
+        # Try config settings first, then fall back to environment variables
+        connection_string = settings.AZURE_STORAGE_CONNECTION_STRING or os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        container_name = settings.AZURE_STORAGE_CONTAINER_NAME or os.getenv("AZURE_STORAGE_CONTAINER_NAME", "documents")
 
         if not connection_string:
-            raise ValueError("AZURE_STORAGE_CONNECTION_STRING not found in environment")
+            raise ValueError("AZURE_STORAGE_CONNECTION_STRING not found in config or environment")
 
         self.blob_service_client = BlobServiceClient.from_connection_string(connection_string)
         self.container_name = container_name

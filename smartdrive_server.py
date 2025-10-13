@@ -55,6 +55,20 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["query"]
             }
+        ),
+        Tool(
+            name="read_document",
+            description="Retrieve the full text of a specific document from Azure Blob Storage using its document ID. Use this when you need the complete content of a document that was found in search results.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "doc_id": {
+                        "type": "string",
+                        "description": "Document ID (e.g., 'doc_abc123def456') obtained from search results"
+                    }
+                },
+                "required": ["doc_id"]
+            }
         )
     ]
 
@@ -143,6 +157,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 f"📁 **Path:** {doc_info['file_path']}\n"
                 f"📅 **Modified:** {doc_info['modified']}\n"
                 f"📊 **Size:** {text_length:,} characters\n"
+                f"🔑 **Document ID:** `{doc_id}`\n"
                 f"📝 **Preview:**\n{preview_text}\n\n"
                 f"---\n\n"
             )
@@ -156,7 +171,28 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             current_size += len(result_block)
 
         return [TextContent(type="text", text=output)]
-    
+
+    elif name == "read_document":
+        doc_id = arguments["doc_id"]
+
+        # Retrieve full document text from Azure Blob Storage
+        full_text = document_storage.retrieve_document(doc_id)
+
+        if full_text is None:
+            return [TextContent(
+                type="text",
+                text=f"❌ Document not found: {doc_id}\n\nThe document may have been deleted or the doc_id may be incorrect."
+            )]
+
+        # Return full document with metadata
+        output = (
+            f"📄 **Document ID:** {doc_id}\n"
+            f"📊 **Size:** {len(full_text):,} characters\n\n"
+            f"**Full Text:**\n{full_text}"
+        )
+
+        return [TextContent(type="text", text=output)]
+
     raise ValueError(f"Unknown tool: {name}")
 
 if __name__ == "__main__":

@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     AZURE_FORM_RECOGNIZER_ENDPOINT: Optional[str] = None
     USE_DOCUMENT_INTELLIGENCE: str = "selective"  # Options: "never", "selective", "always"
 
+    # Azure Blob Storage Configuration (for RAG document storage)
+    AZURE_STORAGE_CONNECTION_STRING: Optional[str] = None
+    AZURE_STORAGE_CONTAINER_NAME: str = "documents"
+
     # Performance Settings
     EMBEDDING_TIMEOUT: int = 30
 
