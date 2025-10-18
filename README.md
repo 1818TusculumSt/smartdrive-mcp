@@ -76,6 +76,8 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
    - Copy **Application (client) ID** and **Directory (tenant) ID**
 
 4. **Create Pinecone Index**
+
+   **Option A: Manual Creation (Recommended for most users)**
    - Go to [Pinecone](https://www.pinecone.io/) → Create Index
    - Name: `smartdrive`
    - Dimensions: Choose based on your embedding provider:
@@ -87,6 +89,16 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
    - Region: Choose closest to you (e.g., `us-east-1`)
    - **Important**: Check "Enable Hybrid Search" for best results (combines semantic + keyword search)
    - Copy your **API Key** and **Index Host** after creation
+
+   **Option B: Automated Creation (Advanced users)**
+   ```bash
+   # Configure your .env with Pinecone credentials first
+   python create_hybrid_index.py
+   ```
+   - Automatically creates a hybrid search index optimized for Voyage AI
+   - Uses 2048 dimensions and dotproduct metric
+   - Deletes and recreates existing index (use with caution!)
+   - Useful for emergency recovery or scripted deployments
 
 5. **Create Azure Blob Storage Container**
    - Go to [Azure Portal](https://portal.azure.com) → **Storage Accounts** → Create new (or use existing)
