@@ -101,8 +101,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             "include_metadata": True
         }
 
-        # Add sparse vector if generated successfully
-        if sparse_query_embedding:
+        # Add sparse vector if generated successfully AND non-empty
+        # Pinecone requires sparse vectors to have at least one value
+        if sparse_query_embedding and len(sparse_query_embedding.get("values", [])) > 0:
             query_params["sparse_vector"] = sparse_query_embedding
 
         results = index.query(**query_params)
