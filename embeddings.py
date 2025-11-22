@@ -2,8 +2,8 @@ import numpy as np
 import logging
 from typing import Optional, Dict, List
 import aiohttp
-from sentence_transformers import SentenceTransformer
-from pinecone_text.sparse import BM25Encoder
+# from sentence_transformers import SentenceTransformer
+# from pinecone_text.sparse import BM25Encoder
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ class EmbeddingProvider:
                 nltk.download('punkt_tab', quiet=True)
                 nltk.download('stopwords', quiet=True)
                 # Initialize encoder (this also triggers NLTK internally)
+                from pinecone_text.sparse import BM25Encoder
                 self._bm25_encoder = BM25Encoder.default()
             finally:
                 # Restore stdout
@@ -74,6 +75,7 @@ class EmbeddingProvider:
         """Initialize local sentence-transformer model"""
         try:
             logger.info(f"Loading local embedding model: {settings.EMBEDDING_MODEL}")
+            from sentence_transformers import SentenceTransformer
             self._local_model = SentenceTransformer(settings.EMBEDDING_MODEL)
             logger.info(f"Local embedding model loaded successfully (dim: {self._local_model.get_sentence_embedding_dimension()})")
         except Exception as e:
@@ -403,8 +405,13 @@ class EmbeddingProvider:
             # Lazy-load BM25 encoder
             if self._bm25_encoder is None:
                 logger.info("Initializing BM25 encoder for sparse embeddings...")
-                self._bm25_encoder = BM25Encoder.default()
-                logger.info("BM25 encoder initialized")
+                try:
+                    from pinecone_text.sparse import BM25Encoder
+                    self._bm25_encoder = BM25Encoder.default()
+                    logger.info("BM25 encoder initialized")
+                except ImportError:
+                    logger.warning("Could not import 'pinecone_text'. Sparse embeddings (keyword search) will be disabled.")
+                    return None
 
             # Generate sparse embedding
             sparse_vector = self._bm25_encoder.encode_documents([text])[0]

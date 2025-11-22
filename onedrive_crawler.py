@@ -18,7 +18,7 @@ import zipfile
 # Suppress PyTorch warnings about GPU/accelerator
 warnings.filterwarnings('ignore', category=UserWarning, module='torch')
 
-import easyocr
+# import easyocr  # Lazy loaded in get_ocr_reader
 from pinecone import Pinecone
 from embeddings import EmbeddingProvider
 from config import settings
@@ -97,8 +97,17 @@ def get_ocr_reader():
     global ocr_reader
     if ocr_reader is None:
         print("🔍 Loading local OCR model (first time only, may take a moment)...")
-        ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
-        print("✅ Local OCR model loaded\n")
+        try:
+            import easyocr
+            ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+            print("✅ Local OCR model loaded\n")
+        except ImportError:
+            print("⚠️  Could not import 'easyocr'. Local OCR is unavailable.")
+            print("   (This is expected on Python 3.14. Use Azure OCR or switch to Python 3.11 for local OCR)")
+            return None
+        except Exception as e:
+            print(f"⚠️  Failed to load local OCR: {e}")
+            return None
     return ocr_reader
 
 def ocr_image_with_azure(image_data):
