@@ -18,3 +18,5 @@ azure-ai-formrecognizer
 azure-storage-blob
 olefile
 markdown
+numpy
+nltk

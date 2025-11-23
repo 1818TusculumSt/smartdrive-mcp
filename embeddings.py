@@ -409,8 +409,8 @@ class EmbeddingProvider:
                     from pinecone_text.sparse import BM25Encoder
                     self._bm25_encoder = BM25Encoder.default()
                     logger.info("BM25 encoder initialized")
-                except ImportError:
-                    logger.warning("Could not import 'pinecone_text'. Sparse embeddings (keyword search) will be disabled.")
+                except ImportError as e:
+                    logger.warning(f"Could not import 'pinecone_text': {e}. Sparse embeddings (keyword search) will be disabled.")
                     return None
 
             # Generate sparse embedding

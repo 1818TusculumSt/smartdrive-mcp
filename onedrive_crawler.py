@@ -910,7 +910,8 @@ def upload_to_pinecone(files_data, check_existing=True):
 
         # Show embedding quality info
         coverage_info = f"full doc" if doc_length <= 100000 else f"100K/{ doc_length:,} chars"
-        print(f"         ✅ Generated 1 embedding ({coverage_info}, 2048-dim hybrid)")
+        embedding_type = "2048-dim hybrid" if sparse_embedding else "2048-dim dense-only"
+        print(f"         ✅ Generated 1 embedding ({coverage_info}, {embedding_type})")
 
     # Upsert to Pinecone in batches of 100 (to avoid 4MB limit)
     if vectors:
