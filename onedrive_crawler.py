@@ -1693,12 +1693,12 @@ def cleanup_stale_vectors(seen_file_paths):
         return 0
 
 def check_for_new_folders(token, skip_cache):
-    """Check for new folders not in cache and ask user how to handle them
+    """Check for new top-level folders not in cache and ask user how to handle them
     
     Returns:
         bool: True if cache was updated, False otherwise
     """
-    print(f"🔍 Checking for new folders not in cache...")
+    print(f"🔍 Checking for new top-level folders...")
     
     # Get Documents folder ID
     headers = {"Authorization": f"Bearer {token}"}
@@ -1712,17 +1712,34 @@ def check_for_new_folders(token, skip_cache):
         
     folder_id = response.json()["id"]
     
-    # Discover all folders
-    folders_list, failed_folders = discover_all_folders(token, folder_id, "/Documents")
+    # List ONLY top-level folders (no recursion)
+    url = f"{base_url}/items/{folder_id}/children"
+    top_level_folders = []
+    
+    while url:
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            break
+            
+        page_data = response.json()
+        items = page_data.get("value", [])
+        
+        for item in items:
+            if "folder" in item:
+                folder_name = item['name']
+                folder_path = f"/Documents/{folder_name}"
+                top_level_folders.append((folder_path, folder_name, item['id']))
+                
+        url = page_data.get("@odata.nextLink", None)
 
     # Find folders not in cache
-    new_folders = [(path, name, fid) for path, name, fid in folders_list if path not in skip_cache]
+    new_folders = [(path, name, fid) for path, name, fid in top_level_folders if path not in skip_cache]
 
     if not new_folders:
-        print(f"✅ No new folders found - all folders are cached!\n")
+        print(f"✅ No new top-level folders found - all are cached!\n")
         return False
 
-    print(f"✨ Found {len(new_folders)} new folder(s) not in cache!\n")
+    print(f"✨ Found {len(new_folders)} new top-level folder(s) not in cache!\n")
     print("=" * 60)
     print("🆕 NEW FOLDERS DETECTED")
     print("=" * 60)
