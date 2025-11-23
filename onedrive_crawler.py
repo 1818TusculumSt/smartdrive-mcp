@@ -1692,6 +1692,76 @@ def cleanup_stale_vectors(seen_file_paths):
         print(f"   ⚠️  Cleanup check failed: {e}")
         return 0
 
+def check_for_new_folders(token, skip_cache):
+    """Check for new folders not in cache and ask user how to handle them
+    
+    Returns:
+        bool: True if cache was updated, False otherwise
+    """
+    print(f"🔍 Checking for new folders not in cache...")
+    
+    # Get Documents folder ID
+    headers = {"Authorization": f"Bearer {token}"}
+    base_url = "https://graph.microsoft.com/v1.0/me/drive"
+    url = f"{base_url}/root:/Documents"
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code != 200:
+        print(f"❌ Failed to access Documents folder: {response.text}")
+        return False
+        
+    folder_id = response.json()["id"]
+    
+    # Discover all folders
+    folders_list, failed_folders = discover_all_folders(token, folder_id, "/Documents")
+
+    # Find folders not in cache
+    new_folders = [(path, name, fid) for path, name, fid in folders_list if path not in skip_cache]
+
+    if not new_folders:
+        print(f"✅ No new folders found - all folders are cached!\n")
+        return False
+
+    print(f"✨ Found {len(new_folders)} new folder(s) not in cache!\n")
+    print("=" * 60)
+    print("🆕 NEW FOLDERS DETECTED")
+    print("=" * 60)
+    print("How do you want to handle these new folders?")
+    print("  [y] = Process (extract all file contents)")
+    print("  [l] = List-only (index filenames without extracting)")
+    print("  [n] = Skip (ignore this folder)")
+    print("=" * 60 + "\n")
+
+    # Ask about each new folder
+    for folder_path, folder_name, folder_id_item in new_folders:
+        print(f"📁 New folder: {folder_name}/")
+        print(f"   Path: {folder_path}")
+
+        while True:
+            choice = input("   Choice [y/l/n]: ").lower().strip()
+
+            if choice in ['y', 'yes', '']:
+                skip_cache[folder_path] = "process"
+                print(f"   → ✅ Will PROCESS this folder\n")
+                break
+            elif choice in ['l', 'list', 'list-only']:
+                skip_cache[folder_path] = "list-only"
+                print(f"   → 📋 Will LIST-ONLY this folder\n")
+                break
+            elif choice in ['n', 'no', 'skip']:
+                skip_cache[folder_path] = "skip"
+                print(f"   → ⏭️  Will SKIP this folder\n")
+                break
+            else:
+                print("   Invalid choice, please enter y/l/n")
+
+    # Save updated cache
+    save_folder_skip_cache(skip_cache)
+    print("=" * 60)
+    print("✅ New folder choices saved!")
+    print("=" * 60 + "\n")
+    return True
+
 def list_documents_folder(token, max_files=None, interactive=True, preflight=True, cleanup_stale=True):
     """Recursively crawl Documents folder with interactive folder selection
 
@@ -1728,7 +1798,6 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
 
     # NEW FOLDER DETECTION: If we have cached choices but NOT in full preflight mode,
     # optionally check for new folders not in cache and ask about them
-    check_new_folders = False
     if not interactive and not preflight and len(skip_cache) > 0:
         # Ask user if they want to check for new folders
         print("🔍 New Folder Check:")
@@ -1737,54 +1806,7 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
         check_choice = input("Check for new folders? ").strip().lower()
 
         if check_choice == "check":
-            check_new_folders = True
-            print(f"🔍 Checking for new folders not in cache...")
-            folders_list, failed_folders = discover_all_folders(token, folder_id, "/Documents")
-
-            # Find folders not in cache
-            new_folders = [(path, name, fid) for path, name, fid in folders_list if path not in skip_cache]
-
-            if new_folders:
-                print(f"✨ Found {len(new_folders)} new folder(s) not in cache!\n")
-                print("=" * 60)
-                print("🆕 NEW FOLDERS DETECTED")
-                print("=" * 60)
-                print("How do you want to handle these new folders?")
-                print("  [y] = Process (extract all file contents)")
-                print("  [l] = List-only (index filenames without extracting)")
-                print("  [n] = Skip (ignore this folder)")
-                print("=" * 60 + "\n")
-
-                # Ask about each new folder
-                for folder_path, folder_name, folder_id_item in new_folders:
-                    print(f"📁 New folder: {folder_name}/")
-                    print(f"   Path: {folder_path}")
-
-                    while True:
-                        choice = input("   Choice [y/l/n]: ").lower().strip()
-
-                        if choice in ['y', 'yes', '']:
-                            skip_cache[folder_path] = "process"
-                            print(f"   → ✅ Will PROCESS this folder\n")
-                            break
-                        elif choice in ['l', 'list', 'list-only']:
-                            skip_cache[folder_path] = "list-only"
-                            print(f"   → 📋 Will LIST-ONLY this folder\n")
-                            break
-                        elif choice in ['n', 'no', 'skip']:
-                            skip_cache[folder_path] = "skip"
-                            print(f"   → ⏭️  Will SKIP this folder\n")
-                            break
-                        else:
-                            print("   Invalid choice, please enter y/l/n")
-
-                # Save updated cache
-                save_folder_skip_cache(skip_cache)
-                print("=" * 60)
-                print("✅ New folder choices saved!")
-                print("=" * 60 + "\n")
-            else:
-                print(f"✅ No new folders found - all folders are cached!\n")
+            check_for_new_folders(token, skip_cache)
         else:
             print(f"✅ Skipping new folder check - using cache only (fast!)\n")
 
@@ -1905,8 +1927,9 @@ if __name__ == "__main__":
         print("1. Run crawler (use cached folder choices)")
         print("2. Reset folder choices and start fresh")
         print("3. View/edit cached folder choices")
-        print("4. Delete folder from index")
-        print("5. Exit")
+        print("4. Check for new folders")
+        print("5. Delete folder from index")
+        print("6. Exit")
         print("=" * 60)
 
         if has_cache:
@@ -1914,7 +1937,7 @@ if __name__ == "__main__":
         else:
             print("ℹ️  No cached folder choices yet")
 
-        choice = input("\nSelect option [1-5]: ").strip()
+        choice = input("\nSelect option [1-6]: ").strip()
 
         if choice == "1":
             # Run crawler
@@ -2059,6 +2082,17 @@ if __name__ == "__main__":
                 print("\n⚠️  No cached folder choices to view.\n")
 
         elif choice == "4":
+            # Check for new folders
+            print("\n" + "=" * 60)
+            print("🔍 Check for New Folders")
+            print("=" * 60)
+            
+            check_for_new_folders(token, skip_cache)
+            has_cache = len(skip_cache) > 0
+            
+            input("\nPress Enter to return to menu...")
+
+        elif choice == "5":
             # Delete folder from index
             print("\n" + "=" * 60)
             print("🗑️  Delete Folder from Index")
@@ -2091,7 +2125,7 @@ if __name__ == "__main__":
             else:
                 print("❌ Deletion cancelled\n")
 
-        elif choice == "5":
+        elif choice == "6":
             print("\n👋 Goodbye!\n")
             exit(0)
 
