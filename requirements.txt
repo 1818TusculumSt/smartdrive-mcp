@@ -12,7 +12,7 @@ mcp
 pydantic-settings
 aiohttp
 Pillow
-easyocr
+# easyocr (Optional: Fails on Python 3.14. Install manually if needed for local OCR)
 azure-ai-vision-imageanalysis
 azure-ai-formrecognizer
 azure-storage-blob
