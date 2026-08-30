@@ -52,6 +52,13 @@ class DeltaStore:
             self.item_map = {}
         return self
 
+    def _write_direct(self, data):
+        try:
+            with self.path.open("w", encoding="utf-8") as file:
+                json.dump(data, file, indent=2)
+        except OSError as e:
+            logger.warning("Failed to write delta store %s: %s", self.path, e)
+
     def save(self):
         if self._is_broken_mount():
             logger.warning("Delta store path %s is a directory — skipping persist (fix host: rm -rf %s && touch %s)", self.path, self.path, self.path)
@@ -70,10 +77,21 @@ class DeltaStore:
                 json.dump(data, file, indent=2)
                 file.flush()
                 os.fsync(file.fileno())
-            os.replace(temp_path, self.path)
+            try:
+                os.replace(temp_path, self.path)
+            except OSError as e:
+                # Bind-mounted file (EBUSY) — fall back to direct write
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+                self._write_direct(data)
         finally:
             if os.path.exists(temp_path):
-                os.unlink(temp_path)
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
     def clear(self):
         self.delta_link = None
@@ -83,8 +101,13 @@ class DeltaStore:
         if self.path.exists():
             try:
                 self.path.unlink()
-            except (IsADirectoryError, OSError):
-                pass
+            except OSError:
+                # Bind-mounted file is busy — truncate instead
+                self._write_direct({"delta_link": None, "item_map": {}, "last_sync": datetime.now(timezone.utc).isoformat()})
+                try:
+                    self.path.unlink()
+                except OSError:
+                    pass
 
 
 def get_delta_link(path=DELTA_STORE_FILE):
