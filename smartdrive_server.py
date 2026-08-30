@@ -246,8 +246,7 @@ def run_http(host="127.0.0.1", port=8000):
 
     starlette_app = Starlette(
         routes=[
-            Route("/mcp", endpoint=handle_streamable_http, methods=["GET", "POST", "DELETE"]),
-            Route("/mcp/", endpoint=handle_streamable_http, methods=["GET", "POST", "DELETE"]),
+            Mount("/mcp", app=handle_streamable_http),
             Route("/healthz", endpoint=healthz, methods=["GET"]),
         ],
         lifespan=lifespan,
