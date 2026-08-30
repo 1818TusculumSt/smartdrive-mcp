@@ -7,8 +7,9 @@ in Azure Blob Storage. A background delta-sync task keeps the index fresh; no re
 server, no second MCP server, no webhooks.
 
 ## Architecture
-- `smartdrive_server.py` — MCP server. Tools: `search_onedrive`, `read_document`.
-  Read-only against the cloud index. Spawns background sync loop on startup.
+- `smartdrive_server.py` — Streamable HTTP MCP server. Tools: `search_onedrive`,
+  `read_document`. Read-only against the cloud index. Spawns background sync loop
+  on startup.
 - `delta_sync.py` — Graph delta sync (`/me/drive/root/delta`, client-side
   `/Documents` filter). Incremental via deltaLink; on 410/404 (stale token) falls
   back to full enumeration. State in `~/.smartdrive_delta_store.json` (atomic writes).

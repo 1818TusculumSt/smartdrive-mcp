@@ -20,7 +20,7 @@ Graph delta query (`/me/drive/root/delta`) **is** supported on personal OneDrive
 ## Architecture
 
 ```
-smartdrive_server.py  (single MCP server, spawned by Claude)
+smartdrive_server.py  (single Streamable HTTP MCP server)
         │
         ├─ on startup → start background sync task (asyncio)
         │        ├─ load deltaLink from local store

@@ -64,6 +64,37 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
    pip install -r requirements.txt
    ```
 
+   The default requirements do not install local sentence-transformer embeddings.
+   If using `EMBEDDING_PROVIDER=local`, install them separately. For CPU-only
+   machines, install the CPU PyTorch wheel first to avoid CUDA packages:
+   ```bash
+   pip install --index-url https://download.pytorch.org/whl/cpu torch
+   pip install -r requirements-local.txt
+   ```
+   Alternatively, use `EMBEDDING_PROVIDER=voyage`, `api`, or `pinecone` and skip
+   `requirements-local.txt`.
+
+### Streamable HTTP
+
+The server runs as a stateless Streamable HTTP MCP server on localhost:
+
+```bash
+python smartdrive_server.py
+```
+
+The MCP endpoint is `http://127.0.0.1:8000/mcp`; the health check is
+`http://127.0.0.1:8000/healthz`. Clients that support Streamable HTTP can use:
+
+```json
+{
+  "type": "http",
+  "url": "http://127.0.0.1:8000/mcp"
+}
+```
+
+Only run one SmartDrive server instance at a time, since each instance starts its
+own background sync loop.
+
 3. **Create Azure App Registration**
    - Go to [Azure Portal](https://portal.azure.com) → **App Registrations** → **New registration**
    - Name: `SmartDrive MCP`

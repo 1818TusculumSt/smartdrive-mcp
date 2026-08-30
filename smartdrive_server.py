@@ -3,6 +3,8 @@ import sys
 import json
 import logging
 import asyncio
+import argparse
+import contextlib
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from pinecone import Pinecone
@@ -198,31 +200,66 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
     raise ValueError(f"Unknown tool: {name}")
 
-if __name__ == "__main__":
-    import mcp.server.stdio
+async def run_sync_loop():
+    """Run blocking Graph/index work off the MCP event loop."""
+    interval = settings.SMARTDRIVE_SYNC_INTERVAL
+    while True:
+        await asyncio.to_thread(sync_all, index, embedding_provider, document_storage)
+        if interval <= 0:
+            return
+        await asyncio.sleep(interval)
 
-    async def run_sync_loop():
-        """Run blocking Graph/index work off the MCP event loop."""
-        interval = settings.SMARTDRIVE_SYNC_INTERVAL
-        while True:
-            await asyncio.to_thread(
-                sync_all, index, embedding_provider, document_storage
-            )
-            if interval <= 0:
-                return
-            await asyncio.sleep(interval)
 
-    async def main():
-        async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-            sync_task = asyncio.create_task(run_sync_loop())
+def run_http(host="127.0.0.1", port=8000):
+    """Run the same MCP server using stateless Streamable HTTP."""
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
+    from starlette.types import Receive, Scope, Send
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    import uvicorn
+
+    session_manager = StreamableHTTPSessionManager(
+        app=app,
+        event_store=None,
+        json_response=True,
+        stateless=True,
+    )
+
+    async def handle_streamable_http(scope: Scope, receive: Receive, send: Send):
+        await session_manager.handle_request(scope, receive, send)
+
+    async def healthz(request):
+        return JSONResponse({"status": "ok"})
+
+    @contextlib.asynccontextmanager
+    async def lifespan(starlette_app):
+        sync_task = asyncio.create_task(run_sync_loop())
+        async with session_manager.run():
             try:
-                await app.run(
-                    read_stream,
-                    write_stream,
-                    app.create_initialization_options()
-                )
+                yield
             finally:
                 sync_task.cancel()
                 await asyncio.gather(sync_task, return_exceptions=True)
-    
-    asyncio.run(main())
+
+    starlette_app = Starlette(
+        routes=[
+            Mount("/mcp", app=handle_streamable_http),
+            Route("/healthz", healthz, methods=["GET"]),
+        ],
+        lifespan=lifespan,
+    )
+    logger.info("Starting Streamable HTTP server on http://%s:%d/mcp", host, port)
+    uvicorn.run(starlette_app, host=host, port=port)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="SmartDrive Streamable HTTP server")
+    parser.add_argument("--host", default="127.0.0.1", help="HTTP bind host")
+    parser.add_argument("--port", type=int, default=8000, help="HTTP bind port")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    run_http(args.host, args.port)

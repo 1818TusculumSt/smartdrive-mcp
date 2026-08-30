@@ -8,7 +8,7 @@ openpyxl
 pinecone
 pinecone-text
 sentence-transformers
-mcp
+mcp>=1.10,<2
 pydantic-settings
 aiohttp
 Pillow
