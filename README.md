@@ -192,33 +192,36 @@ own background sync loop.
    - Answer Yes/No for each folder as the crawler discovers them
    - Use "always yes" or "skip always" to remember your choices!
 
-8. **Add to Claude Desktop**
+8. **Start the Streamable HTTP server**
 
-   Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac):
+    ```bash
+    python smartdrive_server.py
+    # MCP endpoint: http://127.0.0.1:8000/mcp
+    # Health check: http://127.0.0.1:8000/healthz
+    ```
 
-   ```json
-   {
-     "mcpServers": {
-       "smartdrive": {
-         "command": "python",
-         "args": [
-           "C:\\path\\to\\smartdrive-mcp\\smartdrive_server.py"
-         ],
-         "env": {
-           "PINECONE_API_KEY": "your_pinecone_api_key",
-           "PINECONE_INDEX_NAME": "smartdrive",
-           "PINECONE_HOST": "smartdrive-xxxxx.svc.aped-xxxx-xxxx.pinecone.io",
-           "AZURE_STORAGE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=...",
-           "AZURE_STORAGE_CONTAINER_NAME": "documents"
-         }
-       }
-     }
-   }
-   ```
+    The server must be running before clients connect. Keep it running in a terminal, `tmux`, or a systemd service. Env vars come from the server's shell/systemd/Docker environment, not Claude's launcher.
 
-   **Note**: The MCP server only needs Pinecone and Azure Blob Storage credentials. The crawler needs additional credentials (Microsoft Graph API, OCR services, embedding API keys).
+    Add the server to any MCP client that supports Streamable HTTP:
 
-9. **Restart Claude Desktop**
+    ```json
+    {
+      "mcpServers": {
+        "smartdrive": {
+          "type": "http",
+          "url": "http://127.0.0.1:8000/mcp"
+        }
+      }
+    }
+    ```
+
+    **Note**: The MCP server only needs Pinecone and Azure Blob Storage credentials. The crawler needs additional credentials (Microsoft Graph API, OCR services, embedding API keys).
+
+9. **Verify the server**
+
+    ```bash
+    curl http://127.0.0.1:8000/healthz
+    ```
 
 ---
 

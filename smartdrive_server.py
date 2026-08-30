@@ -13,19 +13,19 @@ from config import settings
 from document_storage import DocumentStorage
 from delta_sync import sync_all
 
-# Configure logging to stderr ONLY (stdout is reserved for MCP protocol)
+# Configure logging to stderr (keep stdout clean for Uvicorn access logs)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=sys.stderr  # CRITICAL: MCP uses stdout for JSON-RPC, logs must go to stderr
+    stream=sys.stderr
 )
 
 # Silence noisy Azure SDK logging
 logging.getLogger('azure').setLevel(logging.WARNING)
 logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.WARNING)
 
-# Don't load .env - use environment vars from Claude config
-# load_dotenv()  # REMOVE THIS LINE
+# Don't load .env in the server - use environment vars from the host/systemd/Docker env
+# load_dotenv()  # intentionally not called
 
 # Initialize
 app = Server("smartdrive-mcp")
@@ -211,7 +211,7 @@ async def run_sync_loop():
 
 
 def run_http(host="127.0.0.1", port=8000):
-    """Run the same MCP server using stateless Streamable HTTP."""
+    """Run the stateless Streamable HTTP MCP server."""
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
     from starlette.routing import Mount, Route

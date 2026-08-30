@@ -1,7 +1,7 @@
 # AGENTS.md — SmartDrive MCP
 
 ## What this is
-Single local MCP server (stdio) giving Claude hybrid semantic search over a personal
+Single local Streamable HTTP MCP server giving Claude hybrid semantic search over a personal
 OneDrive. Vectors + metadata in Pinecone (namespace `smartdrive`), full document text
 in Azure Blob Storage. A background delta-sync task keeps the index fresh; no remote
 server, no second MCP server, no webhooks.
@@ -22,8 +22,9 @@ server, no second MCP server, no webhooks.
 - `config.py` — pydantic settings from env vars (Claude Desktop config).
 
 ## CRITICAL rules (violations break the server)
-1. **stdout is the MCP JSON-RPC channel.** In server or shared code: never `print()`,
-   never `input()`. Use `logging` configured to stderr.
+1. **Never `print()` or `input()` in server/shared code.** Use `logging` to stderr.
+   Streamable HTTP no longer uses stdout for JSON-RPC, but stdout/stderr discipline
+   keeps logs clean and shared modules safe to reuse.
 2. **Shared modules must be side-effect-free at import.** No client instantiation,
    no `load_dotenv()`, no I/O at module level. Dependencies (index, embedding provider,
    document storage) are passed in as parameters.
@@ -57,6 +58,6 @@ gone from Pinecone + Blob; rename → old IDs removed/new added; corrupt deltaLi
 410 → auto full resync; server answers search while sync runs.
 
 ## Environment
-Launched as `python smartdrive_server.py` from Claude config (no Docker). Env vars
+Launched as `python smartdrive_server.py` (Streamable HTTP on `127.0.0.1:8000`). Env vars
 supply all secrets (Pinecone, Azure, Microsoft client id). Token cache at
 `~/.smartdrive_token_cache.json`. Python 3.12+; deps in `requirements.txt`.

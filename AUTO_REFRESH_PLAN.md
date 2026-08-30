@@ -46,7 +46,7 @@ A "full sync" is just a delta query **without a token** — the first `/me/drive
 1. **`onedrive_crawler.py` cannot be imported by the server.** It `print()`s at import time (stdout is the MCP JSON-RPC channel), calls `load_dotenv()` at module level, instantiates its own Pinecone/EmbeddingProvider/DocumentStorage singletons, and contains `input()` calls. Shared logic must live in a side-effect-free module with injected dependencies and stderr logging.
 2. **`input()` trap:** `list_documents_folder(interactive=False, preflight=False)` still prompts for a new-folder check when a skip cache exists. The background sync must never route through `list_documents_folder`.
 3. **Deletes arrive id-only.** Delta deletions provide `id` + `@removed` — no path. Since `doc_id` = SHA256(path) and `vector_id` = MD5(path), the delta store maintains a persistent `item_id → {path, doc_id, vector_id, modified, size}` map. This also resolves rename/move (same `item_id`, new path → delete old IDs, re-index under new path).
-4. **The sync stack is synchronous.** It must run via `asyncio.to_thread()`; `create_task(sync_all())` directly would block the event loop. The low-level `mcp.server.Server` API has no lifespan support, so the task is spawned in `main()` inside the stdio context.
+4. **The sync stack is synchronous.** It must run via `asyncio.to_thread()`; `create_task(sync_all())` directly would block the event loop. The Streamable HTTP server owns the sync task in its Starlette lifespan.
 
 ---
 
@@ -87,11 +87,12 @@ New file, side-effect-free. Extracted from `onedrive_crawler.py`:
 
 ### Phase 3 — Wire into the MCP server
 
-In `smartdrive_server.py` `main()`, inside the stdio context:
+In `smartdrive_server.py` the Starlette lifespan owns the sync task:
 
 ```python
-sync_task = asyncio.create_task(run_sync_loop(index, embedding_provider, document_storage))
-# ... app.run(...) ...
+sync_task = asyncio.create_task(run_sync_loop())
+async with session_manager.run():
+    yield
 sync_task.cancel()
 ```
 
