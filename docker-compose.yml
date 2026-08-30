@@ -26,9 +26,10 @@ services:
       # EasyOCR models cache (avoid re-downloading 100MB models)
       - ~/.EasyOCR:/root/.EasyOCR
 
-    # Streamable HTTP MCP endpoint, localhost only
+    # Streamable HTTP MCP endpoint, localhost only (host 127.0.0.1, container 0.0.0.0)
     ports:
       - "127.0.0.1:8000:8000"
+    command: ["python", "smartdrive_server.py", "--host", "0.0.0.0"]
 
     # Interactive terminal (for OAuth flow via: docker-compose run --rm smartdrive-mcp python onedrive_crawler.py)
     stdin_open: true

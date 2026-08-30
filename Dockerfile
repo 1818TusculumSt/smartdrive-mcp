@@ -34,5 +34,5 @@ RUN mkdir -p /root/.cache
 # Streamable HTTP MCP port
 EXPOSE 8000
 
-# Default command: run the MCP server (Streamable HTTP on 127.0.0.1:8000)
-CMD ["python", "smartdrive_server.py"]
+# Default command: run the MCP server (Streamable HTTP on 0.0.0.0:8000 inside container)
+CMD ["python", "smartdrive_server.py", "--host", "0.0.0.0"]
