@@ -31,28 +31,13 @@ class DocumentStorage:
         self.container_name = container_name
         self.container_client = self.blob_service_client.get_container_client(container_name)
 
-        # Ensure container exists (auto-create on first run)
+        # Ensure container exists
         try:
             self.container_client.get_container_properties()
             logger.info(f"Connected to Azure Blob container: {container_name}")
         except Exception as e:
-            error_str = str(e)
-            is_not_found = "ContainerNotFound" in error_str or "container does not exist" in error_str.lower()
-            if is_not_found:
-                logger.info(f"Container '{container_name}' not found, creating it...")
-                try:
-                    self.container_client.create_container()
-                    logger.info(f"Created Azure Blob container: {container_name}")
-                except Exception as create_e:
-                    # Race condition: another instance created it
-                    if "ContainerAlreadyExists" in str(create_e) or "already exists" in str(create_e).lower():
-                        logger.info(f"Container '{container_name}' already created")
-                    else:
-                        logger.error(f"Failed to create container '{container_name}': {create_e}")
-                        raise
-            else:
-                logger.error(f"Failed to connect to container '{container_name}': {e}")
-                raise
+            logger.error(f"Failed to connect to container '{container_name}': {e}")
+            raise
 
     def generate_doc_id(self, file_path: str) -> str:
         """
