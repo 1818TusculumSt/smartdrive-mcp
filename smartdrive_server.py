@@ -224,7 +224,7 @@ def run_http(host="127.0.0.1", port=8000):
     session_manager = StreamableHTTPSessionManager(
         app=app,
         event_store=None,
-        json_response=True,
+        json_response=False,
         stateless=True,
     )
 
