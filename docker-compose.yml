@@ -30,6 +30,10 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     command: ["python", "smartdrive_server.py", "--host", "0.0.0.0"]
+    networks:
+      - smartdrive-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     # Interactive terminal (for OAuth flow via: docker-compose run --rm smartdrive-mcp python onedrive_crawler.py)
     stdin_open: true
@@ -47,3 +51,8 @@ services:
         reservations:
           cpus: '1.0'
           memory: 2G
+
+networks:
+  smartdrive-net:
+    name: smartdrive-net
+    driver: bridge
