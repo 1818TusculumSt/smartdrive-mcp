@@ -46,6 +46,7 @@ class Settings(BaseSettings):
 
     # Performance Settings
     EMBEDDING_TIMEOUT: int = 30
+    SMARTDRIVE_SYNC_INTERVAL: int = 900
 
     class Config:
         case_sensitive = True

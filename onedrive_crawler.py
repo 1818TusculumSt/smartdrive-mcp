@@ -4,7 +4,6 @@ import requests
 import io
 import json
 from pathlib import Path
-from dotenv import load_dotenv
 import fitz  # PyMuPDF
 from docx import Document
 from pptx import Presentation
@@ -25,7 +24,9 @@ from config import settings
 from document_intelligence import should_use_document_intelligence, extract_with_document_intelligence
 from document_storage import DocumentStorage
 
-load_dotenv()
+import logging
+
+logger = logging.getLogger(__name__)
 
 CLIENT_ID = os.getenv("MICROSOFT_CLIENT_ID")
 TENANT_ID = os.getenv("MICROSOFT_TENANT_ID")
@@ -41,28 +42,11 @@ FOLDER_SKIP_CACHE_FILE = Path.home() / ".smartdrive_folder_skip_cache.json"
 # Global settings for this run
 EXTRACT_ZIP_CONTENTS = False  # Will be set based on user choice
 
-# Initialize Pinecone
-pc = Pinecone(api_key=settings.PINECONE_API_KEY)
-index = pc.Index(
-    name=settings.PINECONE_INDEX_NAME,
-    host=settings.PINECONE_HOST
-)
-
-# Initialize embedding provider
-# Show correct model name based on provider
-if settings.EMBEDDING_PROVIDER == "voyage":
-    model_display = settings.VOYAGE_MODEL
-else:
-    model_display = settings.EMBEDDING_MODEL
-
-print(f"🧠 Loading {settings.EMBEDDING_PROVIDER} embedding provider ({model_display})...")
-embedding_provider = EmbeddingProvider(init_bm25=True)
-print("✅ Embedding provider loaded\n")
-
-# Initialize document storage
-print("☁️  Initializing Azure Blob Storage...")
-document_storage = DocumentStorage()
-print("✅ Document storage ready\n")
+# These dependencies are configured by the interactive CLI or by indexing_core.
+# Keeping them unset at import prevents duplicate clients and stdout output in MCP.
+index = None
+embedding_provider = None
+document_storage = None
 
 # Initialize EasyOCR reader (lazy-loaded on first use)
 ocr_reader = None
@@ -75,22 +59,33 @@ USE_AZURE_OCR = bool(AZURE_VISION_KEY and AZURE_VISION_ENDPOINT)
 # OCR strict mode: If true, ONLY use Azure OCR (no EasyOCR fallback)
 OCR_STRICT_MODE = os.getenv("OCR_STRICT_MODE", "false").lower() == "true"
 
-if USE_AZURE_OCR:
-    print("☁️  Azure Computer Vision OCR enabled (10-20x faster than local!)")
-    if OCR_STRICT_MODE:
-        print("⚠️  STRICT MODE: EasyOCR fallback disabled - files will fail if Azure fails")
-    from azure.ai.vision.imageanalysis import ImageAnalysisClient
-    from azure.ai.vision.imageanalysis.models import VisualFeatures
-    from azure.core.credentials import AzureKeyCredential
+azure_client = None
+VisualFeatures = None
 
+
+def configure_dependencies(index_instance, embedding_instance, storage_instance,
+                           extract_zip_contents=False):
+    """Configure shared crawler dependencies without creating clients."""
+    global index, embedding_provider, document_storage, EXTRACT_ZIP_CONTENTS
+    index = index_instance
+    embedding_provider = embedding_instance
+    document_storage = storage_instance
+    EXTRACT_ZIP_CONTENTS = extract_zip_contents
+
+
+def _configure_azure_ocr():
+    """Create the optional Azure OCR client lazily."""
+    global azure_client, VisualFeatures
+    if azure_client is not None or not USE_AZURE_OCR:
+        return
+    from azure.ai.vision.imageanalysis import ImageAnalysisClient
+    from azure.ai.vision.imageanalysis.models import VisualFeatures as _VisualFeatures
+    from azure.core.credentials import AzureKeyCredential
+    VisualFeatures = _VisualFeatures
     azure_client = ImageAnalysisClient(
         endpoint=AZURE_VISION_ENDPOINT,
         credential=AzureKeyCredential(AZURE_VISION_KEY)
     )
-    print("✅ Azure OCR ready\n")
-else:
-    print("💻 Using local EasyOCR (Azure OCR not configured)")
-    print("   💡 Tip: Add AZURE_VISION_KEY to .env for 10-20x faster OCR!\n")
 
 def get_ocr_reader():
     """Lazy-load EasyOCR reader (downloads models on first use)"""
@@ -120,6 +115,7 @@ def ocr_image_with_azure(image_data):
         Extracted text or None if failed
     """
     try:
+        _configure_azure_ocr()
         result = azure_client.analyze(
             image_data=image_data,
             visual_features=[VisualFeatures.READ]
@@ -1929,6 +1925,13 @@ def list_documents_folder(token, max_files=None, interactive=True, preflight=Tru
 
 if __name__ == "__main__":
     import asyncio
+
+    pc = Pinecone(api_key=settings.PINECONE_API_KEY)
+    configure_dependencies(
+        pc.Index(name=settings.PINECONE_INDEX_NAME, host=settings.PINECONE_HOST),
+        EmbeddingProvider(init_bm25=True),
+        DocumentStorage(),
+    )
 
     token = get_access_token()
     print("✅ Authentication successful!\n")

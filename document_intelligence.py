@@ -1,6 +1,9 @@
 """Azure Document Intelligence integration for enhanced form/table extraction"""
 import os
+import logging
 from io import BytesIO
+
+logger = logging.getLogger(__name__)
 
 # Configuration
 AZURE_FORM_RECOGNIZER_KEY = os.getenv("AZURE_FORM_RECOGNIZER_KEY")
@@ -10,26 +13,30 @@ USE_FORM_RECOGNIZER = bool(AZURE_FORM_RECOGNIZER_KEY and AZURE_FORM_RECOGNIZER_E
 
 form_recognizer_client = None
 
-if USE_FORM_RECOGNIZER and USE_DOCUMENT_INTELLIGENCE != "never":
+def _get_form_recognizer_client():
+    """Create the optional client on first extraction, not at import time."""
+    global form_recognizer_client
+    if form_recognizer_client is not None or not USE_FORM_RECOGNIZER:
+        return form_recognizer_client
     try:
         from azure.ai.formrecognizer import DocumentAnalysisClient
         from azure.core.credentials import AzureKeyCredential
-
         form_recognizer_client = DocumentAnalysisClient(
             endpoint=AZURE_FORM_RECOGNIZER_ENDPOINT,
             credential=AzureKeyCredential(AZURE_FORM_RECOGNIZER_KEY)
         )
-        print(f"📋 Azure Document Intelligence enabled (mode: {USE_DOCUMENT_INTELLIGENCE})")
-        print("✅ Document Intelligence ready\n")
+        logger.info("Azure Document Intelligence enabled (mode: %s)", USE_DOCUMENT_INTELLIGENCE)
     except ImportError:
-        print("⚠️  azure-ai-formrecognizer not installed - run: pip install azure-ai-formrecognizer\n")
-    except Exception as e:
-        print(f"⚠️  Document Intelligence init failed: {e}\n")
+        logger.warning("azure-ai-formrecognizer is not installed")
+    except Exception:
+        logger.exception("Document Intelligence initialization failed")
+    return form_recognizer_client
 
 
 def should_use_document_intelligence(file_name):
     """Determine if we should use Document Intelligence for this file"""
-    if not form_recognizer_client or USE_DOCUMENT_INTELLIGENCE == "never":
+    client = _get_form_recognizer_client()
+    if not client or USE_DOCUMENT_INTELLIGENCE == "never":
         return False
 
     if USE_DOCUMENT_INTELLIGENCE == "always":
@@ -50,12 +57,13 @@ def extract_with_document_intelligence(file_bytes):
     Returns:
         Extracted text or None if failed
     """
-    if not form_recognizer_client:
+    client = _get_form_recognizer_client()
+    if not client:
         return None
 
     try:
         print(f"      📋 Using Document Intelligence (5-15 seconds)...")
-        poller = form_recognizer_client.begin_analyze_document(
+        poller = client.begin_analyze_document(
             "prebuilt-document", document=BytesIO(file_bytes)
         )
         result = poller.result(timeout=120)  # 2 minute timeout

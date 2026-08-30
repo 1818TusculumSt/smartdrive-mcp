@@ -2,12 +2,14 @@ import os
 import sys
 import json
 import logging
+import asyncio
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from pinecone import Pinecone
 from embeddings import EmbeddingProvider
 from config import settings
 from document_storage import DocumentStorage
+from delta_sync import sync_all
 
 # Configure logging to stderr ONLY (stdout is reserved for MCP protocol)
 logging.basicConfig(
@@ -197,15 +199,30 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     raise ValueError(f"Unknown tool: {name}")
 
 if __name__ == "__main__":
-    import asyncio
     import mcp.server.stdio
-    
+
+    async def run_sync_loop():
+        """Run blocking Graph/index work off the MCP event loop."""
+        interval = settings.SMARTDRIVE_SYNC_INTERVAL
+        while True:
+            await asyncio.to_thread(
+                sync_all, index, embedding_provider, document_storage
+            )
+            if interval <= 0:
+                return
+            await asyncio.sleep(interval)
+
     async def main():
         async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-            await app.run(
-                read_stream,
-                write_stream,
-                app.create_initialization_options()
-            )
+            sync_task = asyncio.create_task(run_sync_loop())
+            try:
+                await app.run(
+                    read_stream,
+                    write_stream,
+                    app.create_initialization_options()
+                )
+            finally:
+                sync_task.cancel()
+                await asyncio.gather(sync_task, return_exceptions=True)
     
     asyncio.run(main())
