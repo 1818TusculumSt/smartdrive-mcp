@@ -32,18 +32,12 @@ class DeltaStore:
         self.delta_link = None
         self.item_map = {}
 
-    def _remove_if_broken(self):
-        try:
-            if self.path.is_dir():
-                import shutil
-                shutil.rmtree(self.path)
-                logger.warning("Removed directory at delta store path %s", self.path)
-        except Exception as e:
-            logger.warning("Failed to remove broken delta store path %s: %s", self.path, e)
+    def _is_broken_mount(self):
+        return self.path.is_dir()
 
     def load(self):
-        if self.path.is_dir():
-            self._remove_if_broken()
+        if self._is_broken_mount():
+            logger.warning("Delta store path %s is a directory (Docker file mount created a dir) — treating as empty and using ephemeral state", self.path)
             return self
         if not self.path.exists():
             return self
@@ -59,8 +53,9 @@ class DeltaStore:
         return self
 
     def save(self):
-        if self.path.is_dir():
-            self._remove_if_broken()
+        if self._is_broken_mount():
+            logger.warning("Delta store path %s is a directory — skipping persist (fix host: rm -rf %s && touch %s)", self.path, self.path, self.path)
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "delta_link": self.delta_link,
@@ -83,13 +78,13 @@ class DeltaStore:
     def clear(self):
         self.delta_link = None
         self.item_map = {}
-        if self.path.is_dir():
-            self._remove_if_broken()
-        elif self.path.exists():
+        if self._is_broken_mount():
+            return
+        if self.path.exists():
             try:
                 self.path.unlink()
-            except IsADirectoryError:
-                self._remove_if_broken()
+            except (IsADirectoryError, OSError):
+                pass
 
 
 def get_delta_link(path=DELTA_STORE_FILE):

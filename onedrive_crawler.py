@@ -138,16 +138,26 @@ def ocr_image_with_azure(image_data):
 def load_token_cache():
     """Load token cache from file"""
     cache = msal.SerializableTokenCache()
-    if TOKEN_CACHE_FILE.exists():
-        with open(TOKEN_CACHE_FILE, 'r') as f:
-            cache.deserialize(f.read())
+    try:
+        if TOKEN_CACHE_FILE.is_dir():
+            return cache
+        if TOKEN_CACHE_FILE.exists():
+            with open(TOKEN_CACHE_FILE, 'r') as f:
+                cache.deserialize(f.read())
+    except (IsADirectoryError, OSError):
+        pass
     return cache
 
 def save_token_cache(cache):
     """Save token cache to file"""
     if cache.has_state_changed:
-        with open(TOKEN_CACHE_FILE, 'w') as f:
-            f.write(cache.serialize())
+        try:
+            if TOKEN_CACHE_FILE.is_dir():
+                return
+            with open(TOKEN_CACHE_FILE, 'w') as f:
+                f.write(cache.serialize())
+        except (IsADirectoryError, OSError):
+            pass
 
 def get_access_token(silent_only=False):
     """Authenticate using device code flow with token caching
@@ -1071,15 +1081,25 @@ def discover_files_in_folder(token, folder_id, folder_path, file_paths):
 
 def load_folder_skip_cache():
     """Load folder skip preferences from cache"""
-    if FOLDER_SKIP_CACHE_FILE.exists():
-        with open(FOLDER_SKIP_CACHE_FILE, 'r') as f:
-            return json.load(f)
+    try:
+        if FOLDER_SKIP_CACHE_FILE.is_dir():
+            return {}
+        if FOLDER_SKIP_CACHE_FILE.exists():
+            with open(FOLDER_SKIP_CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except (IsADirectoryError, OSError, ValueError):
+        pass
     return {}
 
 def save_folder_skip_cache(cache):
     """Save folder skip preferences to cache"""
-    with open(FOLDER_SKIP_CACHE_FILE, 'w') as f:
-        json.dump(cache, f, indent=2)
+    try:
+        if FOLDER_SKIP_CACHE_FILE.is_dir():
+            return
+        with open(FOLDER_SKIP_CACHE_FILE, 'w') as f:
+            json.dump(cache, f, indent=2)
+    except (IsADirectoryError, OSError):
+        pass
 
 def should_process_folder(folder_path, folder_name, skip_cache, interactive=True):
     """Ask user if they want to process this folder
