@@ -23,14 +23,16 @@ COPY onedrive_crawler.py .
 COPY embeddings.py .
 COPY config.py .
 COPY smartdrive_server.py .
+COPY delta_sync.py .
+COPY indexing_core.py .
 COPY document_intelligence.py .
 COPY document_storage.py .
 
 # Create directories for cache files
 RUN mkdir -p /root/.cache
 
-# Expose MCP server port (if needed)
-EXPOSE 8080
+# Streamable HTTP MCP port
+EXPOSE 8000
 
-# Default command: run the crawler interactively
-CMD ["python", "onedrive_crawler.py"]
+# Default command: run the MCP server (Streamable HTTP on 127.0.0.1:8000)
+CMD ["python", "smartdrive_server.py"]

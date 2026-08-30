@@ -20,10 +20,17 @@ services:
       # Folder skip cache (remembers folder choices)
       - ~/.smartdrive_folder_skip_cache.json:/root/.smartdrive_folder_skip_cache.json
 
+      # Delta sync state (deltaLink + item map; avoids full resync on restart)
+      - ~/.smartdrive_delta_store.json:/root/.smartdrive_delta_store.json
+
       # EasyOCR models cache (avoid re-downloading 100MB models)
       - ~/.EasyOCR:/root/.EasyOCR
 
-    # Interactive terminal (for OAuth flow)
+    # Streamable HTTP MCP endpoint, localhost only
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    # Interactive terminal (for OAuth flow via: docker-compose run --rm smartdrive-mcp python onedrive_crawler.py)
     stdin_open: true
     tty: true
 

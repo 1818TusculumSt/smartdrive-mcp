@@ -287,23 +287,21 @@ Docker automatically mounts these cache files from your host:
 
 ### Using with Claude Desktop
 
-Point Claude Desktop to the Docker container's MCP server:
+Start the container (it runs the Streamable HTTP server on `127.0.0.1:8000`):
+
+```bash
+docker-compose up -d
+curl http://127.0.0.1:8000/healthz   # verify
+```
+
+Then point Claude Desktop at the HTTP endpoint:
 
 ```json
 {
   "mcpServers": {
     "smartdrive": {
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "--env-file",
-        "/path/to/smartdrive-mcp/.env",
-        "smartdrive-mcp",
-        "python",
-        "smartdrive_server.py"
-      ]
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp"
     }
   }
 }
