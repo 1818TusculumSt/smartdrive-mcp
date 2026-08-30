@@ -188,9 +188,6 @@ class EmbeddingProvider:
         Returns:
             Normalized embedding vector or None on error
         """
-        if not self._session:
-            self._session = aiohttp.ClientSession()
-
         url = "https://api.pinecone.io/embed"
 
         headers = {
@@ -211,40 +208,40 @@ class EmbeddingProvider:
         }
 
         try:
-            async with self._session.post(
-                url,
-                json=data,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=settings.EMBEDDING_TIMEOUT)
-            ) as response:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=data,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=settings.EMBEDDING_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"Pinecone inference API error {response.status}: {error_text}")
+                        return None
 
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"Pinecone inference API error {response.status}: {error_text}")
-                    return None
+                    result = await response.json()
 
-                result = await response.json()
+                    if not result.get("data") or len(result["data"]) == 0:
+                        logger.error(f"Invalid Pinecone inference response: {result}")
+                        return None
 
-                if not result.get("data") or len(result["data"]) == 0:
-                    logger.error(f"Invalid Pinecone inference response: {result}")
-                    return None
+                    embedding_list = result["data"][0].get("values")
 
-                embedding_list = result["data"][0].get("values")
+                    if not embedding_list or not isinstance(embedding_list, list):
+                        logger.error("Invalid Pinecone inference response: missing values array")
+                        return None
 
-                if not embedding_list or not isinstance(embedding_list, list):
-                    logger.error("Invalid Pinecone inference response: missing values array")
-                    return None
+                    embedding = np.array(embedding_list, dtype=np.float32)
 
-                embedding = np.array(embedding_list, dtype=np.float32)
+                    norm = np.linalg.norm(embedding)
+                    if norm > 1e-6:
+                        embedding = embedding / norm
+                    else:
+                        logger.warning("Embedding has near-zero norm, cannot normalize")
 
-                norm = np.linalg.norm(embedding)
-                if norm > 1e-6:
-                    embedding = embedding / norm
-                else:
-                    logger.warning("Embedding has near-zero norm, cannot normalize")
-
-                logger.debug(f"Generated Pinecone embedding (dim: {len(embedding)})")
-                return embedding
+                    logger.debug(f"Generated Pinecone embedding (dim: {len(embedding)})")
+                    return embedding
 
         except aiohttp.ClientError as e:
             logger.error(f"Pinecone inference API request failed: {e}")
@@ -255,9 +252,6 @@ class EmbeddingProvider:
 
     async def _get_api_embedding(self, text: str) -> Optional[np.ndarray]:
         """Get embedding from OpenAI-compatible API"""
-        if not self._session:
-            self._session = aiohttp.ClientSession()
-
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {settings.EMBEDDING_API_KEY}"
@@ -269,40 +263,40 @@ class EmbeddingProvider:
         }
 
         try:
-            async with self._session.post(
-                settings.EMBEDDING_API_URL,
-                json=data,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=settings.EMBEDDING_TIMEOUT)
-            ) as response:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    settings.EMBEDDING_API_URL,
+                    json=data,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=settings.EMBEDDING_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"Embedding API error {response.status}: {error_text}")
+                        return None
 
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"Embedding API error {response.status}: {error_text}")
-                    return None
+                    result = await response.json()
 
-                result = await response.json()
+                    if not result.get("data") or len(result["data"]) == 0:
+                        logger.error("Invalid embedding API response: missing data")
+                        return None
 
-                if not result.get("data") or len(result["data"]) == 0:
-                    logger.error("Invalid embedding API response: missing data")
-                    return None
+                    embedding_list = result["data"][0].get("embedding")
 
-                embedding_list = result["data"][0].get("embedding")
+                    if not embedding_list or not isinstance(embedding_list, list):
+                        logger.error("Invalid embedding API response: missing embedding array")
+                        return None
 
-                if not embedding_list or not isinstance(embedding_list, list):
-                    logger.error("Invalid embedding API response: missing embedding array")
-                    return None
+                    embedding = np.array(embedding_list, dtype=np.float32)
 
-                embedding = np.array(embedding_list, dtype=np.float32)
+                    norm = np.linalg.norm(embedding)
+                    if norm > 1e-6:
+                        embedding = embedding / norm
+                    else:
+                        logger.warning("Embedding has near-zero norm, cannot normalize")
 
-                norm = np.linalg.norm(embedding)
-                if norm > 1e-6:
-                    embedding = embedding / norm
-                else:
-                    logger.warning("Embedding has near-zero norm, cannot normalize")
-
-                logger.debug(f"Generated API embedding (dim: {len(embedding)})")
-                return embedding
+                    logger.debug(f"Generated API embedding (dim: {len(embedding)})")
+                    return embedding
 
         except aiohttp.ClientError as e:
             logger.error(f"Embedding API request failed: {e}")
@@ -326,9 +320,6 @@ class EmbeddingProvider:
         Returns:
             Normalized embedding vector or None on error
         """
-        if not self._session:
-            self._session = aiohttp.ClientSession()
-
         url = "https://api.voyageai.com/v1/embeddings"
 
         headers = {
@@ -344,41 +335,41 @@ class EmbeddingProvider:
         }
 
         try:
-            async with self._session.post(
-                url,
-                json=data,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=settings.EMBEDDING_TIMEOUT)
-            ) as response:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=data,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=settings.EMBEDDING_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"Voyage AI API error {response.status}: {error_text}")
+                        return None
 
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"Voyage AI API error {response.status}: {error_text}")
-                    return None
+                    result = await response.json()
 
-                result = await response.json()
+                    if not result.get("data") or len(result["data"]) == 0:
+                        logger.error(f"Invalid Voyage AI response: {result}")
+                        return None
 
-                if not result.get("data") or len(result["data"]) == 0:
-                    logger.error(f"Invalid Voyage AI response: {result}")
-                    return None
+                    embedding_list = result["data"][0].get("embedding")
 
-                embedding_list = result["data"][0].get("embedding")
+                    if not embedding_list or not isinstance(embedding_list, list):
+                        logger.error("Invalid Voyage AI response: missing embedding array")
+                        return None
 
-                if not embedding_list or not isinstance(embedding_list, list):
-                    logger.error("Invalid Voyage AI response: missing embedding array")
-                    return None
+                    embedding = np.array(embedding_list, dtype=np.float32)
 
-                embedding = np.array(embedding_list, dtype=np.float32)
+                    # Voyage embeddings are already normalized
+                    norm = np.linalg.norm(embedding)
+                    if norm > 1e-6:
+                        embedding = embedding / norm
+                    else:
+                        logger.warning("Embedding has near-zero norm, cannot normalize")
 
-                # Voyage embeddings are already normalized
-                norm = np.linalg.norm(embedding)
-                if norm > 1e-6:
-                    embedding = embedding / norm
-                else:
-                    logger.warning("Embedding has near-zero norm, cannot normalize")
-
-                logger.debug(f"Generated Voyage AI embedding (dim: {len(embedding)})")
-                return embedding
+                    logger.debug(f"Generated Voyage AI embedding (dim: {len(embedding)})")
+                    return embedding
 
         except aiohttp.ClientError as e:
             logger.error(f"Voyage AI API request failed: {e}")
