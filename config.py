@@ -8,7 +8,8 @@ class Settings(BaseSettings):
     """
     Configuration settings loaded from environment variables.
 
-    For MCP servers, these are set in Claude Desktop's config file.
+    For the Streamable HTTP server, set these in the shell/systemd env
+    or Docker env_file (.env). No Claude Desktop launcher injection.
     """
 
     # Pinecone Configuration

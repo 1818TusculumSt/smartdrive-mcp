@@ -19,7 +19,7 @@ server, no second MCP server, no webhooks.
   `indexing_core.py`; never imported by the server.
 - `embeddings.py` — `EmbeddingProvider` (dense + BM25 sparse).
 - `document_storage.py` — Azure Blob doc store. `doc_id` = `doc_<sha256(path)[:16]>`.
-- `config.py` — pydantic settings from env vars (Claude Desktop config).
+- `config.py` — pydantic settings from env vars (host env / Docker `.env`).
 
 ## CRITICAL rules (violations break the server)
 1. **Never `print()` or `input()` in server/shared code.** Use `logging` to stderr.
@@ -47,7 +47,8 @@ server, no second MCP server, no webhooks.
 - Token refresh mid-sync follows the `token_ref` list pattern from the crawler.
 
 ## Commands
-- MCP server: `python smartdrive_server.py`
+- MCP server: `python smartdrive_server.py` (Streamable HTTP on `127.0.0.1:8000`; `--host`/`--port` to override)
+- Health check: `curl http://127.0.0.1:8000/healthz`
 - Manual crawl (interactive): `python onedrive_crawler.py`
 - Manual delta sync: `python delta_sync.py sync`
 

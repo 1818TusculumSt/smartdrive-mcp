@@ -14,13 +14,13 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 - **RAG Architecture**: True retrieval-augmented generation with vectors in Pinecone, full text in Azure Blob
 - **Hybrid Search**: Combines semantic (dense vectors) + keyword (sparse BM25) for maximum accuracy
 - **Semantic Search**: Natural language queries - "tax forms" finds W-2s, 1099s, etc.
-- **Flexible Embeddings**: Choose local (free), Voyage AI (recommended), Pinecone inference, or OpenAI-compatible APIs
+- **Flexible Embeddings**: Choose local (free, optional), Voyage AI (recommended), Pinecone inference, or OpenAI-compatible APIs
 - **ONE Vector Per File**: No chunking = 12.5x faster indexing, simpler search, better results
 - **100K Char Embeddings**: Full small docs embedded, intelligent sampling (80% beginning + 20% end) for large files
-- **Incremental Sync**: Smart detection of unchanged files - only indexes new/modified content
+- **Auto-Refreshing Index**: Background delta sync (Graph `/delta`) — boot + every 15 min, with stale-token fallback
 - **Interactive Folder Selection**: Choose which folders to index, skip what you don't need
-- **Smart Caching**: Remembers authentication and folder choices between runs
-- **MCP Integration**: Two tools for Claude Desktop: `search_onedrive` and `read_document`
+- **Smart Caching**: Remembers authentication, folder choices, and delta state between runs
+- **MCP Integration**: Two tools via Streamable HTTP — `search_onedrive` and `read_document` (any MCP client: Open WebUI, Claude, Inspector)
 
 ### Document Support
 - **Documents**: PDF (with OCR for scanned docs!), DOCX, DOC
@@ -49,7 +49,7 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 - Microsoft 365 account with OneDrive
 - Azure account (for Blob Storage - free tier available)
 - Pinecone account (free tier available with hybrid search support)
-- Claude Desktop
+- Any MCP client supporting Streamable HTTP (Open WebUI, Claude, MCP Inspector)
 
 ### Quick Setup
 
@@ -76,14 +76,16 @@ SmartDrive is an MCP (Model Context Protocol) server that brings intelligent sem
 
 ### Streamable HTTP
 
-The server runs as a stateless Streamable HTTP MCP server on localhost:
+The server is **Streamable HTTP-only** (no stdio). Default is `127.0.0.1:8000`, override with `--host`/`--port`:
 
 ```bash
 python smartdrive_server.py
+# or
+python smartdrive_server.py --host 127.0.0.1 --port 8083
 ```
 
-The MCP endpoint is `http://127.0.0.1:8000/mcp`; the health check is
-`http://127.0.0.1:8000/healthz`. Clients that support Streamable HTTP can use:
+The MCP endpoint is `http://127.0.0.1:8000/mcp` (adjust port if overridden); the health check is
+`http://127.0.0.1:8000/healthz`. The server binds `0.0.0.0` inside Docker so the host mapping works. Clients that support Streamable HTTP can use:
 
 ```json
 {
@@ -92,8 +94,7 @@ The MCP endpoint is `http://127.0.0.1:8000/mcp`; the health check is
 }
 ```
 
-Only run one SmartDrive server instance at a time, since each instance starts its
-own background sync loop.
+Only run one SmartDrive server instance at a time, since each instance owns its background delta sync loop. Keep it running (terminal, `tmux`, systemd) — clients connect over HTTP, they don't spawn it.
 
 3. **Create Azure App Registration**
    - Go to [Azure Portal](https://portal.azure.com) → **App Registrations** → **New registration**
@@ -192,36 +193,40 @@ own background sync loop.
    - Answer Yes/No for each folder as the crawler discovers them
    - Use "always yes" or "skip always" to remember your choices!
 
-8. **Start the Streamable HTTP server**
+ 8. **Start the Streamable HTTP server**
 
-    ```bash
-    python smartdrive_server.py
-    # MCP endpoint: http://127.0.0.1:8000/mcp
-    # Health check: http://127.0.0.1:8000/healthz
-    ```
+     ```bash
+     python smartdrive_server.py
+     # MCP endpoint: http://127.0.0.1:8000/mcp
+     # Health check: http://127.0.0.1:8000/healthz
+     ```
 
-    The server must be running before clients connect. Keep it running in a terminal, `tmux`, or a systemd service. Env vars come from the server's shell/systemd/Docker environment, not Claude's launcher.
+     The server must be running before clients connect. Keep it running in a terminal, `tmux`, or a systemd service. Env vars come from the server's shell/systemd/Docker environment. Base requirements no longer include `sentence-transformers` — for `EMBEDDING_PROVIDER=local` also run `pip install -r requirements-local.txt` (CPU-only: install `torch` CPU wheel first).
 
-    Add the server to any MCP client that supports Streamable HTTP:
+     Add the server to any MCP client that supports Streamable HTTP:
 
-    ```json
-    {
-      "mcpServers": {
-        "smartdrive": {
-          "type": "http",
-          "url": "http://127.0.0.1:8000/mcp"
-        }
-      }
-    }
-    ```
+     ```json
+     {
+       "mcpServers": {
+         "smartdrive": {
+           "type": "http",
+           "url": "http://127.0.0.1:8000/mcp"
+         }
+       }
+     }
+     ```
 
-    **Note**: The MCP server only needs Pinecone and Azure Blob Storage credentials. The crawler needs additional credentials (Microsoft Graph API, OCR services, embedding API keys).
+     **Note**: The MCP server only needs Pinecone and Azure Blob Storage credentials. The crawler/delta sync need additional credentials (Microsoft Graph API, OCR services, embedding API keys).
 
 9. **Verify the server**
 
-    ```bash
-    curl http://127.0.0.1:8000/healthz
-    ```
+     ```bash
+     curl http://127.0.0.1:8000/healthz
+     # Docker (host port may differ if you remapped 127.0.0.1:8083:8000):
+     docker exec openwebui curl -s http://host.docker.internal:8000/healthz  # needs extra_hosts on the client container
+     # or via shared network:
+     # docker exec openwebui curl -s http://smartdrive-mcp:8000/healthz
+     ```
 
 ---
 
@@ -265,8 +270,10 @@ own background sync loop.
 # Build the image
 docker-compose build
 
-# Run crawler interactively
-docker-compose run --rm smartdrive-mcp
+# Run crawler interactively (uses host .env + cache mounts)
+docker-compose run --rm smartdrive-mcp python onedrive_crawler.py
+# Manual delta sync
+docker-compose run --rm smartdrive-mcp python delta_sync.py sync
 
 # View logs
 docker-compose logs -f
@@ -283,40 +290,66 @@ docker-compose down --rmi all
 
 ### Cache Persistence
 
-Docker automatically mounts these cache files from your host:
+Docker mounts these from your host (create empty files first to avoid Docker creating directories):
+```bash
+touch ~/.smartdrive_token_cache.json ~/.smartdrive_folder_skip_cache.json ~/.smartdrive_delta_store.json
+```
 - `~/.smartdrive_token_cache.json` - OAuth tokens (survives restarts)
 - `~/.smartdrive_folder_skip_cache.json` - Folder choices (remembers skip/process decisions)
+- `~/.smartdrive_delta_store.json` - Delta sync state (deltaLink + item map; avoids full resync)
 - `~/.EasyOCR/` - OCR models (avoids re-downloading 100MB)
 
-### Using with Claude Desktop
+### Using with MCP clients (Open WebUI, Claude, Inspector)
 
-Start the container (it runs the Streamable HTTP server on `127.0.0.1:8000`):
+Start the container (it runs the Streamable HTTP server on `0.0.0.0:8000` inside, mapped to `127.0.0.1:8000` on the host):
 
 ```bash
 docker-compose up -d
-curl http://127.0.0.1:8000/healthz   # verify
+curl http://127.0.0.1:8000/healthz   # verify (use your host-mapped port if you changed 8000 → 8083)
 ```
 
-Then point Claude Desktop at the HTTP endpoint:
+If your client runs in Docker on a **separate** network (e.g., Open WebUI), keep them separate and use `host.docker.internal` — add to the *client's* compose:
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
+```
+
+Then point the client at the host-mapped URL:
 
 ```json
 {
   "mcpServers": {
     "smartdrive": {
       "type": "http",
-      "url": "http://127.0.0.1:8000/mcp"
+      "url": "http://host.docker.internal:8000/mcp"
     }
   }
 }
 ```
 
+If they share `smartdrive-net` (`docker network connect smartdrive-net openwebui`), use the in-network name instead:
+
+```json
+{
+  "mcpServers": {
+    "smartdrive": {
+      "type": "http",
+      "url": "http://smartdrive-mcp:8000/mcp"
+    }
+  }
+}
+```
+
+**Common pitfall:** inside the client container `127.0.0.1` is itself. `host.docker.internal` or the shared service name is required when the client is containerized.
+
 ---
 
 ## 🚀 Usage
 
-### In Claude Desktop
+### MCP tools
 
-SmartDrive provides two MCP tools that Claude can use:
+SmartDrive provides two MCP tools to any connected client:
 
 **1. `search_onedrive` - Hybrid semantic + keyword search**
 - Searches Pinecone with dense (semantic) + sparse (BM25/keyword) vectors
@@ -329,7 +362,7 @@ SmartDrive provides two MCP tools that Claude can use:
 - Use this when you need the full text of a search result
 - Returns entire document (no truncation)
 
-Simply ask Claude natural language questions:
+Simply ask your assistant natural language questions:
 
 - "Search my OneDrive for resume"
 - "Find tax documents from 2024"
@@ -337,7 +370,7 @@ Simply ask Claude natural language questions:
 - "Where are my meeting notes about the Q4 budget?"
 - "Read the full content of document doc_abc123" (after getting doc_id from search)
 
-Claude will automatically use `search_onedrive` to find relevant documents, and can use `read_document` to retrieve full content when needed.
+The client will automatically use `search_onedrive` to find relevant documents and `read_document` to retrieve full content.
 
 ### Interactive Crawler Menu
 
@@ -386,18 +419,18 @@ SmartDrive uses a **true RAG (Retrieval Augmented Generation) architecture** tha
 
 ```
 ┌─────────────────┐
-│  Claude Desktop │
+│  MCP Client     │  (Open WebUI / Claude / Inspector)
 └────────┬────────┘
-         │ MCP Protocol
+         │ Streamable HTTP
          ▼
 ┌─────────────────────┐       ┌──────────────────┐
 │ smartdrive_server.py│◄──────┤  Pinecone Index  │
-│  (MCP Server)       │       │ (Hybrid Vectors) │
+│  (Streamable HTTP)  │       │ (Hybrid Vectors) │
 └────────┬────────────┘       └──────────────────┘
          │                             │
-         │                             ├─ Dense vectors (semantic)
-         │                             ├─ Sparse vectors (BM25/keyword)
-         │                             ├─ Minimal metadata
+         │  background delta sync      ├─ Dense vectors (semantic)
+         │  (Graph /delta)             ├─ Sparse vectors (BM25/keyword)
+         │  every 15 min               ├─ Minimal metadata
          │                             └─ doc_id references
          │
          └──► ┌──────────────────┐
@@ -411,9 +444,9 @@ SmartDrive uses a **true RAG (Retrieval Augmented Generation) architecture** tha
 
 ### How It Works
 
-**1. Indexing (onedrive_crawler.py)**
+**1. Indexing (onedrive_crawler.py + delta_sync.py)**
 
-When you run the crawler, here's what happens for each OneDrive file:
+Manual `onedrive_crawler.py` and background `delta_sync.py` share the same extract→embed→upsert pipeline (`indexing_core.py`). For each file:
 
 1. **Authenticate** via Microsoft Graph API (device code flow, cached)
 2. **Crawl OneDrive** recursively with interactive folder selection
@@ -430,12 +463,13 @@ When you run the crawler, here's what happens for each OneDrive file:
 5. **Store in two places**:
    - **Azure Blob Storage**: Full document text → returns `doc_id` (SHA256 hash of file path)
    - **Pinecone**: Dense + sparse vectors + minimal metadata + `doc_id` reference
-6. **Incremental sync**: Checks Pinecone metadata (modified date + size) to skip unchanged files
-7. **Cleanup**: Removes stale vectors from Pinecone + orphaned blobs from Azure
+ 6. **Incremental/manual sync**: Crawler checks Pinecone metadata; delta sync uses `item_map` + `modified`/`size` to skip unchanged, deletes via `ContainerNotFound`-safe path
+ 7. **Auto-refresh**: `delta_sync.py` via Graph `root/delta` — full enumeration on first run/410, incremental thereafter; respects folder skip cache; runs inside the server process
+ 8. **Cleanup**: Removes stale vectors from Pinecone + orphaned blobs from Azure (including moves/renames via path-derived IDs)
 
 **2. Searching (smartdrive_server.py)**
 
-When Claude searches your OneDrive via MCP:
+When any MCP client searches your OneDrive:
 
 1. **Query embedding**: Convert natural language query to dense + sparse vectors
 2. **Hybrid search**: Query Pinecone with both vectors for semantic + keyword matching
@@ -447,8 +481,10 @@ When Claude searches your OneDrive via MCP:
 ### Components
 
 **Core Files:**
-- [smartdrive_server.py](smartdrive_server.py) - MCP server exposing `search_onedrive` and `read_document` tools
-- [onedrive_crawler.py](onedrive_crawler.py) - Indexing script: crawls OneDrive, extracts text, generates embeddings, stores in Pinecone + Azure Blob
+- [smartdrive_server.py](smartdrive_server.py) - Streamable HTTP MCP server exposing `search_onedrive` and `read_document`; owns the background delta sync loop
+- [delta_sync.py](delta_sync.py) - Graph delta sync (`/me/drive/root/delta`, client-side `/Documents` filter, 410 fallback, `item_map` for id-only deletes)
+- [indexing_core.py](indexing_core.py) - Shared side-effect-free extract→embed→upsert pipeline (used by both crawler and delta sync)
+- [onedrive_crawler.py](onedrive_crawler.py) - Interactive manual CLI (imports from `indexing_core.py`, never imported by the server)
 - [embeddings.py](embeddings.py) - Embedding provider abstraction (local/Voyage/Pinecone/OpenAI-compatible APIs)
 - [document_storage.py](document_storage.py) - Azure Blob Storage interface for full document text
 - [document_intelligence.py](document_intelligence.py) - Azure Document Intelligence integration for advanced form/table extraction
@@ -457,13 +493,13 @@ When Claude searches your OneDrive via MCP:
 **Dependencies:**
 - **Pinecone**: Vector database for hybrid search (dense + sparse vectors)
 - **Azure Blob Storage**: Document storage (full text, unlimited size)
-- **Microsoft Graph API**: OneDrive file access (device code flow auth)
+- **Microsoft Graph API**: OneDrive file access (device code flow auth; delta sync is silent-only)
 - **PyMuPDF (fitz)**: PDF text extraction
 - **python-docx, python-pptx, openpyxl**: Office document parsing
 - **EasyOCR**: Local OCR fallback (CPU-based, ~10-30 sec/page)
 - **Azure Computer Vision** (optional): Cloud OCR (10-20x faster, ~1-3 sec/page)
 - **Azure Document Intelligence** (optional): Advanced form/table extraction
-- **sentence-transformers**: Local embedding model (default: all-MiniLM-L6-v2)
+- **sentence-transformers** (optional, `requirements-local.txt`): Local embedding model (default: all-MiniLM-L6-v2)
 - **pinecone-text**: BM25 encoder for sparse vectors (keyword matching)
 
 ### Key Architecture Decisions
@@ -737,9 +773,9 @@ SmartDrive uses a sophisticated fallback system:
 
 ### Maintaining Your Index
 
-1. **Re-run Periodically**: Run crawler monthly to catch new files
-2. **Cached Choices**: Your folder preferences are saved
-3. **Incremental Updates**: Future versions will support smart syncing
+1. **Automatic**: Background delta sync keeps the index fresh (boot + every `SMARTDRIVE_SYNC_INTERVAL` seconds, default 15 min; `0` = boot only)
+2. **Manual**: Re-run `python onedrive_crawler.py` for interactive control, or `python delta_sync.py sync` for a one-shot delta sync
+3. **Cached Choices**: Folder preferences (`~/.smartdrive_folder_skip_cache.json`) and delta state (`~/.smartdrive_delta_store.json`) persist between runs
 
 ---
 
@@ -823,21 +859,14 @@ Open a GitHub issue with:
 - ✅ Pinecone inference (llama-text-embed-v2, 1024 dims)
 - ✅ Custom API (OpenAI-compatible endpoints)
 
-### Coming Soon 🚀
-
-#### Incremental Sync Daemon (High Priority)
-A true background service for automatic index updates:
-- **Microsoft Graph Delta API**: Detects only changed files (adds/updates/deletes)
-- **Continuous Background Process**: Runs 24/7, checks every 5-10 minutes
-- **Smart State Tracking**: Stores deltaLink tokens to track changes since last sync
-- **Deletion Handling**: Automatically removes vectors for deleted files from Pinecone
-- **Efficient Processing**: Only indexes what changed - no full re-crawls
-- **Proper Daemon**: Not a scheduled script - true background service with logging
-- **Estimated complexity**: 3-4 hours implementation (delta API makes this surprisingly doable)
-- **Result**: True "set and forget" - your index stays fresh automatically
+### Recently Completed ✅ — Incremental Sync Daemon
+- **Microsoft Graph Delta API** (`/me/drive/root/delta`) — incremental via `deltaLink`, full enumeration on 410/404; no `?token=` bootstrap on personal accounts
+- **Background inside the one server** — `asyncio.to_thread` so search never blocks; silent-only auth; log-never-raise
+- **`item_map` for id-only deletes** — Graph deletes are id-only; path-derived `doc_id`/`vector_id` resolved via persistent map; moves/renames delete old + re-index new
+- **Folder-aware** — respects `~/.smartdrive_folder_skip_cache.json` (process / list-only / skip)
+- **Streamable HTTP-only transport** — `Uvicorn` + `Starlette` + `StreamableHTTPSessionManager` (`stateless=True`, `json_response=True`); host port remapping documented for `host.docker.internal`
 
 #### Other Features
-- [ ] Open WebUI integration
 - [ ] Support for SharePoint/Teams files
 - [ ] Configurable crawl depth
 - [ ] Custom metadata extraction
@@ -851,8 +880,6 @@ Built for the community, by the community. PRs welcome!
 
 **Areas we'd love help with:**
 - Performance optimizations
-- Incremental sync implementation
-- Open WebUI integration
 - Documentation improvements
 - Unit tests
 - Additional file formats (e.g., RTF, ODT)
