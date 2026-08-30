@@ -7,7 +7,7 @@ python-pptx
 openpyxl
 pinecone
 pinecone-text
-sentence-transformers
+# Local embeddings (EMBEDDING_PROVIDER=local) are optional: pip install -r requirements-local.txt
 mcp>=1.10,<2
 pydantic-settings
 aiohttp
